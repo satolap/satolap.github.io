@@ -6,6 +6,7 @@ the release notes (module counts), the tag's tree (which verified modules exist)
 README.md, rendered with GitHub's own Markdown API (the same sanitised HTML github.com shows).
 
     python3 tools/build.py            # rebuild everything for the latest release
+    python3 tools/build.py --audit    # design and accessibility facts (contrast, headings, alt text, sizes)
     python3 tools/build.py --check    # print whether the deployed site is older than the latest release
                                       # (sets stale=true|false for GitHub Actions)
 
@@ -341,9 +342,102 @@ def verify() -> int:
     return 1 if bad else 0
 
 
+def _lum(hexc: str) -> float:
+    h = hexc.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    def ch(v: int) -> float:
+        v = v / 255
+        return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
+
+
+def contrast(a: str, b: str) -> float:
+    la, lb = sorted((_lum(a), _lum(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def audit() -> int:
+    """Design and accessibility facts for the designer roles (advisory; exit 0). Run after a build."""
+    import glob
+    from html.parser import HTMLParser
+    css = open(os.path.join(STATIC, "style.css"), encoding="utf-8").read()
+    blocks = re.findall(r":root\s*\{([^}]*)\}", css)
+    themes = {}
+    for name, blk in zip(("light", "dark"), blocks[:2]):
+        themes[name] = dict(re.findall(r"--([\w-]+):\s*(#[0-9a-fA-F]{3,6})", blk))
+    pairs = [("ink", "bg", 4.5), ("ink", "surface", 4.5), ("muted", "bg", 4.5), ("muted", "surface", 4.5),
+             ("accent", "bg", 4.5), ("accent", "surface", 4.5), ("accent-ink", "accent", 4.5), ("code-ink", "code-bg", 4.5),
+             ("ok", "surface", 4.5), ("warn", "surface", 4.5), ("line", "surface", 1.3)]
+    print("## Colour contrast (WCAG 2.2: 4.5:1 for text, 3:1 for large text and UI)")
+    problems = []
+    for t, tok in themes.items():
+        for fg, bg, need in pairs:
+            if fg in tok and bg in tok:
+                c = contrast(tok[fg], tok[bg])
+                flag = "" if c >= need else "  <-- below " + str(need)
+                print(f"  {t:5} {fg:>10} on {bg:<8} {tok[fg]} / {tok[bg]}  {c:5.2f}:1{flag}")
+                if flag:
+                    problems.append(f"contrast {t} {fg}/{bg} {c:.2f}:1 < {need}")
+
+    class P(HTMLParser):
+        def __init__(self):
+            super().__init__(); self.h = []; self.img_noalt = 0; self.links = []; self._a = None
+            self.main = False; self.lang = False; self.title = ""; self._t = False; self.desc = ""
+        def handle_starttag(self, tag, attrs):
+            a = dict(attrs)
+            if re.fullmatch(r"h[1-6]", tag): self.h.append(int(tag[1]))
+            if tag == "img" and "alt" not in a: self.img_noalt += 1
+            if tag == "a": self._a = [a.get("aria-label") or ""]
+            if tag == "main": self.main = True
+            if tag == "html" and a.get("lang"): self.lang = True
+            if tag == "title": self._t = True
+            if tag == "meta" and a.get("name") == "description": self.desc = a.get("content") or ""
+            if tag == "img" and self._a is not None: self._a.append(a.get("alt") or "img")
+        def handle_endtag(self, tag):
+            if tag == "a" and self._a is not None: self.links.append("".join(self._a).strip()); self._a = None
+            if tag == "title": self._t = False
+        def handle_data(self, d):
+            if self._a is not None: self._a.append(d)
+            if self._t: self.title += d
+    pages = sorted(glob.glob(os.path.join(SITE, "**", "*.html"), recursive=True))
+    total = 0
+    print("\n## Pages")
+    for f in pages:
+        text = open(f, encoding="utf-8").read(); total += len(text.encode())
+        p = P(); p.feed(text)
+        rel = os.path.relpath(f, SITE)
+        skips = sum(1 for a, b in zip(p.h, p.h[1:]) if b > a + 1)
+        issues = []
+        if p.h.count(1) != 1: issues.append(f"{p.h.count(1)} h1")
+        if skips: issues.append(f"{skips} heading-level skips")
+        if p.img_noalt: issues.append(f"{p.img_noalt} img without alt")
+        empty = sum(1 for l in p.links if not l)
+        if empty: issues.append(f"{empty} links without text")
+        if not p.main: issues.append("no <main>")
+        if not p.lang: issues.append("no lang")
+        if not (10 <= len(p.title) <= 70): issues.append(f"title length {len(p.title)}")
+        if not (50 <= len(p.desc) <= 170): issues.append(f"description length {len(p.desc)}")
+        if len(text) > 200_000: issues.append(f"{len(text)//1024} KB")
+        if issues:
+            problems.extend(f"{rel}: {i}" for i in issues)
+    print(f"  {len(pages)} pages, {total // 1024} KB of HTML in total; style.css {len(css) // 1024} KB")
+    print(f"\n## Findings ({len(problems)})")
+    from collections import Counter
+    kinds = Counter(re.sub(r"^[^:]+: ", "", x) if ": " in x else x for x in problems)
+    for k, n in kinds.most_common(30):
+        print(f"  {n:3} x {k}")
+    for x in problems[:40]:
+        print("  - " + x)
+    return 0
+
+
 def main() -> int:
     if "--verify" in sys.argv:
         return verify()
+    if "--audit" in sys.argv:
+        return audit()
     rel = latest_release()
     if "--check" in sys.argv:  # compare with the DEPLOYED site, so a scheduled run rebuilds only for a new release
         import urllib.request
