@@ -181,7 +181,9 @@ def wrap_tables(body: str) -> str:
         out.append(f'<div class="tablewrap" role="region" tabindex="0" aria-label="{html.escape(last)} (table)">{m.group(0)}</div>')
         pos = m.end()
     out.append(body[pos:])
-    return re.sub(r"</?markdown-accessiblity-table>", "", "".join(out))
+    body = re.sub(r"</?markdown-accessiblity-table>", "", "".join(out))
+    # GitHub links each README image (status badges) to its camo proxy copy; the link only reopens the image
+    return re.sub(r'<a [^>]*href="https://camo\.githubusercontent\.com/[^"]*"[^>]*>(<img [^>]*>)</a>', r"\1", body)
 
 
 def toc_nav(toc: list[tuple[str, str]]) -> str:
