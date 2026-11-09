@@ -1,0 +1,141 @@
+{{HEAD}}
+{{HEADER}}
+
+<main id="main">
+<div class="wrap hero" id="top">
+  <img class="hero-logo" src="/logo.svg" width="260" height="228" alt="">
+  <p class="eyebrow">Infrastructure as code for Entra ID and Microsoft 365</p>
+  <h1>Microsoft Graph, as typed Terraform modules.</h1>
+  <p class="lede">A versioned catalog of Terraform modules for Microsoft Graph <b>v1.0</b> and <b>beta</b>, generated from Microsoft's published metadata and built on the official <code>microsoft/msgraph</code> provider. It also includes reviewed, verified modules for directory objects, identity governance and Conditional Access.</p>
+  <div class="cta">
+    <a class="btn primary" href="#start">Get started</a>
+    <a class="btn" href="/terraform-msgraph-modules/modules/">Verified modules</a>
+    <a class="btn" href="https://registry.terraform.io/modules/satolap/modules/msgraph">Terraform Registry</a>
+    <a class="btn" href="https://github.com/satolap/terraform-msgraph-modules/releases">Releases</a>
+  </div>
+  <div class="stats" aria-label="Release {{TAG}} at a glance">
+    <div class="stat"><b>{{V1_COUNT}}</b><span>generated v1.0 modules</span></div>
+    <div class="stat"><b>{{BETA_COUNT}}</b><span>generated beta modules</span></div>
+    <div class="stat"><b>{{VERIFIED_COUNT}}</b><span>verified modules</span></div>
+    <div class="stat"><b>{{TAG}}</b><span>latest release</span></div>
+  </div>
+</div>
+
+<section id="why">
+  <div class="wrap">
+    <h2>Why teams use it</h2>
+    <p class="sub">Manage users, groups, applications, service principals, entitlement management and Conditional Access the same way you manage the rest of your infrastructure: reviewed, versioned and repeatable.</p>
+    <div class="grid">
+      <div class="card"><h3>Built from Microsoft's metadata</h3><p>Generated modules come from the OpenAPI and EDMX definitions in <a href="https://github.com/microsoftgraph/msgraph-metadata">msgraph-metadata</a>. Every release pins the exact upstream commit and SHA-256 hashes.</p></div>
+      <div class="card"><h3>Official provider underneath</h3><p>Modules wrap the <a href="https://registry.terraform.io/providers/microsoft/msgraph/latest/docs">microsoft/msgraph</a> provider's <code>msgraph_resource</code>, which supports Azure CLI, managed identity, service principal and OpenID Connect authentication.</p></div>
+      <div class="card"><h3>Typed inputs, stable outputs</h3><p>Each module has typed Terraform variables, request shaping that omits null optional properties, stable outputs and a README with the Graph URL, lifecycle and import address.</p></div>
+      <div class="card"><h3>Tested before every release</h3><p>Every module is formatted, initialised and validated against pinned provider versions. Credential-free <code>terraform test</code> suites use provider mocks.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="modules">
+  <div class="wrap">
+    <h2>Two collections, one release</h2>
+    <p class="sub">Every release ships both collections under one version. They are subdirectories of the Registry module <code>satolap/modules/msgraph</code>.</p>
+    <div class="two">
+      <div class="card">
+        <h3>Generated modules</h3>
+        <p>These cover create, read, update and delete lifecycles from the v1.0 and beta schemas, for collection endpoints with a documented <code>POST</code> and an item lifecycle of <code>GET</code>, <code>PATCH</code> or <code>PUT</code>, and <code>DELETE</code>. A module's folder is its Graph route.</p>
+        <p style="margin-top:12px">Browse the <a href="https://github.com/satolap/terraform-msgraph-modules/blob/main/v1.0/README.md">v1.0 catalog</a> or the <a href="https://github.com/satolap/terraform-msgraph-modules/blob/main/beta/README.md">beta catalog</a>. Both are grouped by Microsoft Graph service area.</p>
+      </div>
+      <div class="card">
+        <h3>Verified modules</h3>
+        <p>These are reviewed, higher-level modules for common directory and governance scenarios, with documented permissions, lifecycle choices and relationship cleanup. Conditional Access policies default to report-only and require break-glass exclusions.</p>
+      </div>
+    </div>
+
+    <h3 style="margin:36px 0 14px">Verified modules in {{TAG}}</h3>
+    <p class="sub">Each module has its own page with its inputs, permissions, licence requirements and lifecycle notes. <a href="/terraform-msgraph-modules/modules/">Browse all verified modules</a>.</p>
+{{VERIFIED_GROUPS}}
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap two">
+    <div>
+      <h2>Quick start</h2>
+      <p class="sub">Configure the Microsoft Graph provider in your root module, then reference a module by its directory after <code>//</code>, pinned to a release.</p>
+      <p class="sub">Module sources take three forms:</p>
+<pre>satolap/modules/msgraph//v1.0/&lt;graph-route&gt;
+satolap/modules/msgraph//beta/&lt;graph-route&gt;
+satolap/modules/msgraph//verified/&lt;module-path&gt;</pre>
+      <p class="sub" style="margin-top:18px">Verified modules need Terraform 1.11 or later. On the 0.x line, <code>~&gt; {{MINOR}}.0</code> takes fixes only. Read the migration notes before you move to a new minor version. The provider documents how to <a href="https://registry.terraform.io/providers/microsoft/msgraph/latest/docs">authenticate</a>.</p>
+    </div>
+<pre aria-label="Example Terraform configuration">terraform {
+  required_providers {
+    msgraph = {
+      source  = "microsoft/msgraph"
+      version = "&gt;= 0.3.0, &lt; 0.7.0"
+    }
+  }
+}
+
+provider "msgraph" {}
+
+module "engineering_group" {
+  source  = "satolap/modules/msgraph//verified/groups"
+  version = "~&gt; {{MINOR}}.0"
+
+  # Inputs use Microsoft Graph's property names.
+  displayName     = "Engineering"
+  mailNickname    = "engineering"
+  securityEnabled = true
+}</pre>
+  </div>
+</section>
+
+<section id="trust">
+  <div class="wrap">
+    <h2>Release integrity you can audit</h2>
+    <p class="sub">Every published catalog passes these automated checks before its release tag is created.</p>
+    <ol class="checks">
+      <li>Source manifests and cached metadata are checked against their recorded revisions and SHA-256 hashes.</li>
+      <li>Python regression tests cover schema reconciliation, type generation, classification, deterministic output, safe archive handling and atomic publication.</li>
+      <li><code>terraform fmt -check</code>, <code>terraform init -backend=false</code> and <code>terraform validate</code> run for every generated and verified module, against the exact provider versions in the release manifest.</li>
+      <li>Credential-free <code>terraform test</code> suites use provider mocks. They check Graph URL construction, typed request bodies, omission of null optional properties, validation failures and verified relationship behaviour, without contacting a tenant.</li>
+      <li>The release workflow rebuilds the archives from the tagged commit and requires their byte-level SHA-256 checksums to match the tested artifacts. It then creates a build provenance attestation for every release asset.</li>
+    </ol>
+    <p class="sub" style="margin-top:20px">A daily scheduled workflow rebuilds every published release and fails if a tag, an asset digest or an attestation no longer matches. Each release includes the v1.0, beta and verified archives, plus <code>release-manifest.json</code>, <code>interface-changes.json</code> and <code>SHA256SUMS</code>.</p>
+    <p class="note">Mock tests and schema validation do not prove that a caller has the required Microsoft Graph permissions, licence or tenant configuration. Each module's README links to the API documentation for those requirements. Live-tenant integration checks are separate and opt-in.</p>
+  </div>
+</section>
+
+<section id="versions">
+  <div class="wrap">
+    <h2>Versioning</h2>
+    <p class="sub">Versions follow the interface changes that the release gate detects. Each release's notes summarise them, and the exact list is in <code>interface-changes.json</code>.</p>
+    <div class="tablewrap">
+    <table>
+      <thead><tr><th>Change</th><th>While the major version is 0</th><th>From 1.0.0</th></tr></thead>
+      <tbody>
+        <tr><td>Breaking change, accepted by a reviewed release decision with migration notes</td><td>minor</td><td>major</td></tr>
+        <tr><td>Compatible addition or other interface change</td><td>minor</td><td>minor</td></tr>
+        <tr><td>Fix without interface findings</td><td>patch</td><td>patch</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p class="sub" style="margin-top:18px">Microsoft Graph beta APIs are previews and can change incompatibly; Microsoft recommends v1.0 for production. See Microsoft's <a href="https://learn.microsoft.com/en-us/graph/versioning-and-support">versioning and support policy</a>.</p>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <h2>FAQ</h2>
+    <details><summary>Which Terraform provider do the modules use?</summary><p>The official <code>microsoft/msgraph</code> provider. The modules add typed inputs, request shaping, documentation and tests on top of its generic <code>msgraph_resource</code>.</p></details>
+    <details><summary>Can I use beta modules in production?</summary><p>Beta modules carry Microsoft's preview status: the underlying APIs can change without notice. Prefer v1.0 modules where they exist, pin versions, and read each release's interface changes before upgrading.</p></details>
+    <details><summary>Does a first <code>terraform init</code> download everything?</summary><p>Yes. Terraform downloads the whole catalog once for every module block, even though each block uses one directory. Pin a version so that download happens once.</p></details>
+    <details><summary>Can I consume the modules from GitHub instead of the Registry?</summary><p>Yes. Use a Git source pinned to a release tag, for example <code>git::https://github.com/satolap/terraform-msgraph-modules.git//v1.0/&lt;graph-route&gt;?ref={{TAG}}</code>.</p></details>
+    <details><summary>Which permissions do I need?</summary><p>Verified module READMEs document the permissions they need. Generated module READMEs link to Microsoft's API documentation, which lists the permissions for each operation. Grant only what the modules you use require.</p></details>
+  </div>
+</section>
+</main>
+
+{{FOOTER}}
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+ "_doc": "Products listed on https://satolap.github.io. Add an entry per product; 'path' is a sub-site built here, or use 'url' for an external page. Facts must come from public sources only.",
+ "products": [
+  {
+   "id": "terraform-msgraph-modules",
+   "name": "terraform-msgraph-modules",
+   "tagline": "Microsoft Graph, as typed Terraform modules.",
+   "description": "Versioned, tested Terraform modules for Microsoft Graph v1.0 and beta on the official microsoft/msgraph provider, plus verified modules for Entra ID directory objects, identity governance and Conditional Access.",
+   "path": "/terraform-msgraph-modules/",
+   "logo": "/logo.svg",
+   "repo": "satolap/terraform-msgraph-modules",
+   "links": [
+    {"label": "Terraform Registry", "url": "https://registry.terraform.io/modules/satolap/modules/msgraph"},
+    {"label": "GitHub", "url": "https://github.com/satolap/terraform-msgraph-modules"}
+   ],
+   "release_facts": true
+  }
+ ]
+}
