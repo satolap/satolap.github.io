@@ -144,6 +144,61 @@ def summary_and_assurance(md: str) -> tuple[str, str]:
     return summ, assurance
 
 
+def slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+
+
+def heading_ids(body: str) -> tuple[str, list[tuple[str, str]]]:
+    """Give README headings the ids github.com gives them (the Markdown API leaves them out), so links like
+    #inputs work; return the h2 headings for the "On this page" list."""
+    seen: dict[str, int] = {}
+    toc: list[tuple[str, str]] = []
+
+    def add(m: re.Match) -> str:
+        level, attrs, inner = m.group(1), m.group(2), m.group(3)
+        if " id=" in attrs:
+            return m.group(0)
+        text = html.unescape(re.sub(r"<[^>]+>", "", inner)).strip()
+        base = re.sub(r"[^\w\- ]", "", text.lower()).replace(" ", "-")
+        n = seen.get(base, 0)
+        seen[base] = n + 1
+        hid = base if n == 0 else f"{base}-{n}"
+        if level == "2":
+            toc.append((hid, text))
+        return f'<h{level}{attrs} id="{html.escape(hid)}">{inner}</h{level}>'
+
+    return re.sub(r"<h([1-6])((?:\s[^>]*)?)>(.*?)</h\1>", add, body, flags=re.S), toc
+
+
+def wrap_tables(body: str) -> str:
+    """Put each README table in a labelled scroll region that keyboard users can focus and scroll."""
+    out, last, pos = [], "Table", 0
+    for m in re.finditer(r"<h[2-4][^>]*>(.*?)</h[2-4]>|<table\b.*?</table>", body, flags=re.S):
+        if m.group(0).startswith("<h"):
+            last = html.unescape(re.sub(r"<[^>]+>", "", m.group(1))).strip() or last
+            continue
+        out.append(body[pos:m.start()])
+        out.append(f'<div class="tablewrap" role="region" tabindex="0" aria-label="{html.escape(last)} (table)">{m.group(0)}</div>')
+        pos = m.end()
+    out.append(body[pos:])
+    return re.sub(r"</?markdown-accessiblity-table>", "", "".join(out))
+
+
+def toc_nav(toc: list[tuple[str, str]]) -> str:
+    if len(toc) < 4:
+        return ""
+    items = "".join(f'<li><a href="#{html.escape(i)}">{html.escape(t)}</a></li>' for i, t in toc)
+    return f'<nav class="toc" aria-labelledby="toc-title"><p class="toc-title" id="toc-title">On this page</p><ol>{items}</ol></nav>'
+
+
+def meta_desc(text: str, fallback: str, limit: int = 160) -> str:
+    """A search-result description: plain text, 50-170 characters, cut at a word boundary."""
+    t = re.sub(r"\s+", " ", text.replace("`", "").replace("…", "")).strip()
+    if len(t) > limit:
+        t = t[:limit - 1].rsplit(" ", 1)[0].rstrip(",;:.(") + "…"
+    return t if len(t) >= 50 else fallback
+
+
 def md_inline(text: str) -> str:
     """Escape, then render `code` spans only (for card summaries)."""
     out = html.escape(text)
@@ -151,7 +206,8 @@ def md_inline(text: str) -> str:
 
 
 def render(md: str) -> str:
-    return gh("markdown", data={"text": md, "mode": "gfm", "context": REPO})
+    # "markdown" renders like a README on github.com; "gfm" (comment mode) turns every source newline into <br>
+    return gh("markdown", data={"text": md, "mode": "markdown", "context": REPO})
 
 
 SAFE_TAGS = re.compile(r"<\s*/?\s*(script|iframe|object|embed|form|input|style|link|meta|base)\b[^>]*>", re.I)
@@ -225,7 +281,7 @@ def group_lists(mods: list[str], info: dict, tag: str, with_summary: bool) -> st
         if g not in by:
             continue
         if with_summary:
-            parts.append(f'<section class="cat"><h2 id="{re.sub(r"[^a-z0-9]+", "-", g.lower())}">{html.escape(g)}</h2><div class="cards">')
+            parts.append(f'<section class="cat"><h2 id="{slug(g)}">{html.escape(g)}</h2><div class="cards">')
             for m in by[g]:
                 s, a = info[m]
                 badge = f'<span class="badge{" live" if "live-accepted" in a else ""}">{html.escape(a)}</span>' if a else ""
@@ -233,12 +289,22 @@ def group_lists(mods: list[str], info: dict, tag: str, with_summary: bool) -> st
                              f'<p class="path">verified/{html.escape(m)}</p>{badge}<p>{md_inline(s)}</p></a>')
             parts.append("</div></section>")
         else:
-            parts.append(f'      <div class="group"><h3>{html.escape(g)}</h3><ul>')
+            parts.append(f'      <div class="group"><h4>{html.escape(g)}</h4><ul>')
             for m in by[g]:
                 parts.append(f'        <li><a href="{page_url(m)}"><code>{html.escape(short(m))}</code></a></li>')
             parts.append("      </ul></div>")
     parts.append("</div>")
     return "\n".join(parts)
+
+
+def area_index(mods: list[str]) -> str:
+    """Jump links to each Graph area on the catalog, with module counts."""
+    counts: dict[str, int] = {}
+    for m in mods:
+        counts[group_of(m)] = counts.get(group_of(m), 0) + 1
+    items = "".join(f'<li><a href="#{slug(g)}">{html.escape(g)}</a> <span class="n">{counts[g]}</span></li>'
+                    for g in [g for g, _ in GROUPS] + ["Other"] if g in counts)
+    return f'<nav class="toc areas" aria-labelledby="areas-title"><p class="toc-title" id="areas-title">Graph areas</p><ul>{items}</ul></nav>'
 
 
 HUB_HEADER = """<a class="skip" href="#main">Skip to content</a>
@@ -290,7 +356,7 @@ def hub(rel: dict) -> str:
         <div class="cta"><a class="btn primary" href="{html.escape(href)}">Documentation</a> {links}</div>
       </div>
     </article>""")
-    return (head("satolap", "Open-source projects by satolap, including terraform-msgraph-modules: Terraform modules for Microsoft Graph.",
+    return (head("satolap: open-source infrastructure as code", "Open-source projects by satolap, including terraform-msgraph-modules: Terraform modules for Microsoft Graph.",
                  "https://satolap.github.io/") + "\n" + HUB_HEADER + f"""
 <main id="main">
   <div class="wrap hub-hero">
@@ -462,24 +528,27 @@ def main() -> int:
         md = gh(f"repos/{REPO}/contents/verified/{m}/README.md?ref={tag}", "-H", "Accept: application/vnd.github.raw")
         info[m] = summary_and_assurance(md)
         md_body = re.sub(r"\A\s*#\s+[^\n]*\n", "", md, count=1)  # the page has its own title
-        body = sanitize(render(rewrite_links(md_body, m, tag, modset)))
+        body, toc = heading_ids(sanitize(render(rewrite_links(md_body, m, tag, modset))))
+        body = wrap_tables(body)
         src = f"satolap/modules/msgraph//verified/{m}"
         title = f"verified/{m}"
-        desc = info[m][0][:200] or f"Verified Terraform module {m} for Microsoft Graph."
-        crumbs = f'<a href="{BASE}/">Home</a> / <a href="{BASE}/modules/">Verified modules</a> / {html.escape(group_of(m))}'
+        desc = meta_desc(info[m][0], f"Verified Terraform module verified/{m} for Microsoft Graph: inputs, permissions and usage.")
+        crumbs = (f'<a href="{BASE}/">Home</a> / <a href="{BASE}/modules/">Verified modules</a> / '
+                  f'<a href="{BASE}/modules/#{slug(group_of(m))}">{html.escape(group_of(m))}</a>')
         badge = f'<span class="badge{" live" if "live-accepted" in info[m][1] else ""}">{html.escape(info[m][1])}</span>' if info[m][1] else ""
         page = (head(f"{short(m)}: verified module", desc, f"https://satolap.github.io{page_url(m)}") + "\n" + HEADER + f"""
 <main id="main" class="wrap modpage">
-  <p class="crumbs">{crumbs}</p>
+  <nav class="crumbs" aria-label="Breadcrumb">{crumbs}</nav>
   <h1><code>{html.escape(title)}</code></h1>
   {badge}
   <div class="srcbox">
-    <pre>module "{html.escape(m.rsplit('/', 1)[-1].replace('-', '_'))}" {{
+    <pre tabindex="0" role="region" aria-label="Module block to copy">module "{html.escape(m.rsplit('/', 1)[-1].replace('-', '_'))}" {{
   source  = "{html.escape(src)}"
   version = "~&gt; {minor}.0"
 }}</pre>
     <p class="links"><a href="https://github.com/{REPO}/tree/{tag}/verified/{m}">Source at {tag}</a> · <a href="https://registry.terraform.io/modules/satolap/modules/msgraph">Terraform Registry</a> · <a href="https://github.com/{REPO}/releases/tag/{tag}">Release notes</a></p>
   </div>
+  {toc_nav(toc)}
   <article class="md">
 {body}
   </article>
@@ -490,9 +559,10 @@ def main() -> int:
     catalog = (head("Verified modules: terraform-msgraph-modules", f"The {len(mods)} reviewed, verified Terraform modules for Microsoft Graph in {tag}.", SITE_URL + "modules/")
                + "\n" + HEADER + f"""
 <main id="main" class="wrap modpage">
-  <p class="crumbs"><a href="{BASE}/">Home</a> / Verified modules</p>
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="{BASE}/">Home</a> / <span aria-current="page">Verified modules</span></nav>
   <h1>Verified modules</h1>
   <p class="sub">{len(mods)} reviewed modules in <a href="{rel['url']}">{tag}</a> for directory objects, applications, identity governance, role management and Conditional Access. Each page shows the module's README from the release: inputs, permissions, licence requirements, lifecycle notes and its assurance level.</p>
+{area_index(mods)}
 {group_lists(mods, info, tag, True)}
 </main>
 """ + footer(rel))
@@ -501,7 +571,7 @@ def main() -> int:
     home = open(os.path.join(TEMPLATES, "home.html"), encoding="utf-8").read()
     repl = {
         "{{HEAD}}": head("terraform-msgraph-modules: Terraform modules for Microsoft Graph",
-                         "Versioned, tested Terraform modules for Microsoft Graph v1.0 and beta on the official microsoft/msgraph provider, plus verified modules for Entra ID identity governance and Conditional Access.", SITE_URL),
+                         "Versioned, tested Terraform modules for Microsoft Graph v1.0 and beta on the microsoft/msgraph provider, plus verified modules for Entra ID governance.", SITE_URL),
         "{{HEADER}}": HEADER, "{{FOOTER}}": footer(rel), "{{TAG}}": tag, "{{MINOR}}": minor,
         "{{V1_COUNT}}": str(c["v1.0"] or "–"), "{{BETA_COUNT}}": str(c["beta"] or "–"),
         "{{VERIFIED_COUNT}}": str(c["verified"] or len(mods)),
@@ -514,9 +584,18 @@ def main() -> int:
         raise SystemExit(f"unfilled placeholders: {left}")
     write(os.path.join(OUT, "index.html"), home)
     write(os.path.join(SITE, "index.html"), hub(rel))
-    write(os.path.join(SITE, "404.html"), (head("Page not found: satolap", "Page not found.", "https://satolap.github.io/404.html")
-          + "\n" + HUB_HEADER + '\n<main id="main" class="wrap modpage"><h1>Page not found</h1><p class="sub">Go to the '
-          '<a href="/">satolap home page</a> or the <a href="' + BASE + '/">terraform-msgraph-modules docs</a>.</p></main>\n' + hub_footer()))
+    write(os.path.join(SITE, "404.html"), (head("Page not found: satolap", "This page does not exist. Find a verified module, the quick start or the satolap home page instead.", "https://satolap.github.io/404.html")
+          + "\n" + HUB_HEADER + f"""
+<main id="main" class="wrap modpage">
+  <h1>Page not found</h1>
+  <p class="sub">The page may have moved when a module was renamed in a new release. Try one of these:</p>
+  <ul>
+    <li><a href="{BASE}/modules/">Verified modules</a>: all {len(mods)} modules in {tag}, grouped by Graph area</li>
+    <li><a href="{BASE}/#start">Quick start</a> for terraform-msgraph-modules</li>
+    <li><a href="/">satolap home page</a></li>
+  </ul>
+</main>
+""" + hub_footer()))
     write(STAMP, json.dumps({"tag": tag, "published": rel["published"], "verified_modules": len(mods),
                              "counts": c}, indent=1) + "\n")
     print(f"built {SITE_URL} for {tag}: {len(mods)} verified module pages")

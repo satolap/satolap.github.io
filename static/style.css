@@ -31,7 +31,11 @@
   }
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html { scroll-padding-top: 88px; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+@media (min-width: 681px) and (max-width: 1000px) { html { scroll-padding-top: 136px; } }
+@media (max-width: 680px) { html { scroll-padding-top: 12px; } }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 body {
   margin: 0;
   background: var(--bg);
@@ -80,7 +84,7 @@ p code, li code, td code { background: var(--accent-soft); padding: 1px 5px; bor
 
 .mods { columns: 2 300px; column-gap: 28px; }
 .mods .group { break-inside: avoid; margin: 0 0 20px; }
-.mods h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); margin: 0 0 6px; }
+.mods h4 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); margin: 0 0 6px; }
 .mods ul { list-style: none; padding: 0; margin: 0; }
 .mods li { padding: 4px 0; border-bottom: 1px dashed var(--line); font-size: 14.5px; }
 .mods li a { text-decoration: none; }
@@ -129,7 +133,8 @@ a.card.mod .badge { justify-self: start; font-size: 12px; }
 .md .markdown-heading { position: relative; }
 .md a.anchor { display: none; }
 .md p, .md li { color: var(--ink); }
-.md table { display: block; overflow-x: auto; margin: 14px 0; font-size: 14px; }
+.md .tablewrap { margin: 14px 0; }
+.md table { font-size: 14px; width: auto; }
 .md th, .md td { border: 1px solid var(--line); padding: 7px 10px; }
 .md th { background: var(--surface); text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--ink); }
 .md pre { margin: 12px 0; }
@@ -168,3 +173,12 @@ a.card.mod .badge { justify-self: start; font-size: 12px; }
 .hub-hero h1 { max-width: 24ch; }
 
 @media (max-width: 680px) { header.top { position: static; } nav.links { gap: 12px; font-size: 14px; } }
+
+/* "On this page" on module pages and "Graph areas" on the catalog */
+.toc { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; margin: 0 0 28px; max-width: 860px; }
+.toc-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.07em; font-weight: 700; color: var(--muted); margin: 0 0 6px; }
+.toc ol, .toc ul { columns: 2 240px; column-gap: 28px; margin: 0; padding-left: 20px; font-size: 14.5px; }
+.toc ul { list-style: none; padding-left: 0; }
+.toc li { break-inside: avoid; padding: 3px 0; }
+.toc .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+.areas { margin-top: 4px; }

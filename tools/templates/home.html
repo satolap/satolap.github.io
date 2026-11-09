@@ -13,7 +13,7 @@
     <a class="btn" href="https://registry.terraform.io/modules/satolap/modules/msgraph">Terraform Registry</a>
     <a class="btn" href="https://github.com/satolap/terraform-msgraph-modules/releases">Releases</a>
   </div>
-  <div class="stats" aria-label="Release {{TAG}} at a glance">
+  <div class="stats" role="group" aria-label="Release {{TAG}} at a glance">
     <div class="stat"><b>{{V1_COUNT}}</b><span>generated v1.0 modules</span></div>
     <div class="stat"><b>{{BETA_COUNT}}</b><span>generated beta modules</span></div>
     <div class="stat"><b>{{VERIFIED_COUNT}}</b><span>verified modules</span></div>
@@ -62,12 +62,12 @@
       <h2>Quick start</h2>
       <p class="sub">Configure the Microsoft Graph provider in your root module, then reference a module by its directory after <code>//</code>, pinned to a release.</p>
       <p class="sub">Module sources take three forms:</p>
-<pre>satolap/modules/msgraph//v1.0/&lt;graph-route&gt;
+<pre tabindex="0" role="region" aria-label="Module source formats">satolap/modules/msgraph//v1.0/&lt;graph-route&gt;
 satolap/modules/msgraph//beta/&lt;graph-route&gt;
 satolap/modules/msgraph//verified/&lt;module-path&gt;</pre>
       <p class="sub" style="margin-top:18px">Verified modules need Terraform 1.11 or later. On the 0.x line, <code>~&gt; {{MINOR}}.0</code> takes fixes only. Read the migration notes before you move to a new minor version. The provider documents how to <a href="https://registry.terraform.io/providers/microsoft/msgraph/latest/docs">authenticate</a>.</p>
     </div>
-<pre aria-label="Example Terraform configuration">terraform {
+<pre tabindex="0" role="region" aria-label="Example Terraform configuration">terraform {
   required_providers {
     msgraph = {
       source  = "microsoft/msgraph"
@@ -137,5 +137,3 @@ module "engineering_group" {
 </main>
 
 {{FOOTER}}
-</body>
-</html>
