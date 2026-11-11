@@ -171,14 +171,26 @@ def heading_ids(body: str) -> tuple[str, list[tuple[str, str]]]:
 
 
 def wrap_tables(body: str) -> str:
-    """Put each README table in a labelled scroll region that keyboard users can focus and scroll."""
-    out, last, pos = [], "Table", 0
-    for m in re.finditer(r"<h[2-4][^>]*>(.*?)</h[2-4]>|<table\b.*?</table>", body, flags=re.S):
+    """Make each README table and code block a labelled scroll region that keyboard users can focus and
+    scroll (WCAG 2.1.1). Labels name the section they sit in and stay unique on the page."""
+    out, last, pos, used = [], "Table", 0, {}
+
+    def label(kind: str) -> str:
+        name = f"{last} ({kind})"
+        used[name] = used.get(name, 0) + 1
+        return html.escape(name if used[name] == 1 else f"{last} ({kind} {used[name]})")
+
+    for m in re.finditer(r"<h[2-4][^>]*>(.*?)</h[2-4]>|<table\b.*?</table>|<pre\b([^>]*)>", body, flags=re.S):
         if m.group(0).startswith("<h"):
             last = html.unescape(re.sub(r"<[^>]+>", "", m.group(1))).strip() or last
             continue
         out.append(body[pos:m.start()])
-        out.append(f'<div class="tablewrap" role="region" tabindex="0" aria-label="{html.escape(last)} (table)">{m.group(0)}</div>')
+        if m.group(0).startswith("<pre"):
+            attrs = m.group(2) or ""
+            out.append(m.group(0) if "tabindex" in attrs else
+                       f'<pre{attrs} tabindex="0" role="region" aria-label="{label("code")}">')
+        else:
+            out.append(f'<div class="tablewrap" role="region" tabindex="0" aria-label="{label("table")}">{m.group(0)}</div>')
         pos = m.end()
     out.append(body[pos:])
     body = re.sub(r"</?markdown-accessiblity-table>", "", "".join(out))
@@ -287,8 +299,8 @@ def group_lists(mods: list[str], info: dict, tag: str, with_summary: bool) -> st
             for m in by[g]:
                 s, a = info[m]
                 badge = f'<span class="badge{" live" if "live-accepted" in a else ""}">{html.escape(a)}</span>' if a else ""
-                parts.append(f'<a class="card mod" href="{page_url(m)}"><h3><code>{html.escape(short(m))}</code></h3>'
-                             f'<p class="path">verified/{html.escape(m)}</p>{badge}<p>{md_inline(s)}</p></a>')
+                parts.append(f'<article class="card mod"><h3><a href="{page_url(m)}"><code>{html.escape(short(m))}</code></a></h3>'
+                             f'<p class="path">verified/{html.escape(m)}</p>{badge}<p>{md_inline(s)}</p></article>')
             parts.append("</div></section>")
         else:
             parts.append(f'      <div class="group"><h4>{html.escape(g)}</h4><ul>')
@@ -535,7 +547,7 @@ def main() -> int:
         src = f"satolap/modules/msgraph//verified/{m}"
         title = f"verified/{m}"
         desc = meta_desc(info[m][0], f"Verified Terraform module verified/{m} for Microsoft Graph: inputs, permissions and usage.")
-        crumbs = (f'<a href="{BASE}/">Home</a> / <a href="{BASE}/modules/">Verified modules</a> / '
+        crumbs = (f'<a href="{BASE}/">terraform-msgraph-modules</a> / <a href="{BASE}/modules/">Verified modules</a> / '
                   f'<a href="{BASE}/modules/#{slug(group_of(m))}">{html.escape(group_of(m))}</a>')
         badge = f'<span class="badge{" live" if "live-accepted" in info[m][1] else ""}">{html.escape(info[m][1])}</span>' if info[m][1] else ""
         page = (head(f"{short(m)}: verified module", desc, f"https://satolap.github.io{page_url(m)}") + "\n" + HEADER + f"""
@@ -561,7 +573,7 @@ def main() -> int:
     catalog = (head("Verified modules: terraform-msgraph-modules", f"The {len(mods)} reviewed, verified Terraform modules for Microsoft Graph in {tag}.", SITE_URL + "modules/")
                + "\n" + HEADER + f"""
 <main id="main" class="wrap modpage">
-  <nav class="crumbs" aria-label="Breadcrumb"><a href="{BASE}/">Home</a> / <span aria-current="page">Verified modules</span></nav>
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="{BASE}/">terraform-msgraph-modules</a> / <span aria-current="page">Verified modules</span></nav>
   <h1>Verified modules</h1>
   <p class="sub">{len(mods)} reviewed modules in <a href="{rel['url']}">{tag}</a> for directory objects, applications, identity governance, role management and Conditional Access. Each page shows the module's README from the release: inputs, permissions, licence requirements, lifecycle notes and its assurance level.</p>
 {area_index(mods)}
