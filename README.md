@@ -9,11 +9,13 @@ Source of https://satolap.github.io: the satolap home page, plus a documentation
 | Output | Source |
 | --- | --- |
 | `/` and `/404.html` | `tools/products.json`, with live release facts for each product that sets `release_facts` |
-| `/terraform-msgraph-modules/` | `tools/templates/home.html`, filled with the latest release's tag, date, module counts and tested provider version (parsed from its release notes), its asset names, the verified module list grouped by Graph area, and the minimum Terraform and provider versions across the verified module READMEs |
-| `/terraform-msgraph-modules/modules/` and `/terraform-msgraph-modules/modules/<path>/` | every verified module of the latest release (a folder under `verified/` with `main.tf` and `README.md`, tests excluded). Each page renders that module's `README.md` through GitHub's Markdown API, with a facts box (Graph area, assurance, requirements, release, licence), an "On this page" list, the other modules of its Graph area and previous/next links |
+| `/terraform-msgraph-modules/` (Overview), `/get-started/`, `/versioning/`, `/support/`, `/faq/` | one template each under `tools/templates/` (`PAGES` in `build.py` lists them in sidebar order), filled with the latest release's tag, date, module counts and tested provider version (parsed from its release notes), its asset names, the verified coverage by Graph area, and the minimum Terraform and provider versions across the verified module READMEs |
+| `/terraform-msgraph-modules/modules/` and `/terraform-msgraph-modules/modules/<path>/` | every verified module of the latest release (a folder under `verified/` with `main.tf` and `README.md`, tests excluded). Each page renders that module's `README.md` through GitHub's Markdown API, with a facts box (Graph area, assurance, requirements, release, licence), the other modules of its Graph area and previous/next links |
 | `/style.css`, `/logo.svg`, `/.nojekyll` | `static/` |
 
-Relative links in a README that point to another verified module go to that module's page on this site. Every other relative link goes to GitHub at the release tag.
+Every page under `/terraform-msgraph-modules/` uses the documentation layout that `layout()` in `build.py` renders: a sticky header, a left sidebar that lists the section pages and every verified module by Graph area (the current page marked with `aria-current`), the document, and a right sidebar "On this page" built from the document's `h2` and `h3` headings at build time. Both sidebars are sticky and scroll on their own; below 1180 px the outline moves above the document and below 900 px both sidebars become `<details>` menus above it, with no script (`::details-content` keeps them open on wide screens; browsers without it get collapsible menus at every width).
+
+Relative links in a README that point to another verified module go to that module's page on this site. Every other relative link goes to GitHub at the release tag. The overview keeps the fragment ids the single-page site used (`#start`, `#versions`, `#support`, `#faq`, …; `LEGACY_ANCHORS` in `build.py`) so links to them still land on a short summary with a link to the page.
 
 `.github/workflows/pages.yml` builds and deploys on every push to `main`, on manual dispatch, and every 3 hours. The scheduled run deploys only when the latest public release is newer than the one the live site was built from (`/terraform-msgraph-modules/release.json`). A new release therefore reaches the site within 3 hours, with nobody involved.
 
@@ -21,9 +23,12 @@ Relative links in a README that point to another verified module go to that modu
 
 ```bash
 python3 tools/build.py            # build _site/ for the latest release
-python3 tools/build.py --verify   # internal links resolve; no private names, tenant domains or scripts
+python3 tools/build.py --verify   # internal links and same-page fragments resolve, the overview keeps its legacy anchors;
+                                  # no private names, tenant domains or scripts
 python3 tools/build.py --audit    # design and accessibility facts: contrast (text, code and status colours in both themes),
-                                  # heading order, alt text, link text, landmarks and named navs, skip links, titles,
+                                  # heading order, alt text, link text, landmarks (named navs and asides, details with
+                                  # summaries), the documentation layout (a Documentation nav marking the current page,
+                                  # an "On this page" nav wherever a document has two or more h2), skip links, titles,
                                   # descriptions, duplicate ids, page weight
 python3 tools/build.py --check    # is the deployed site older than the latest release?
 python3 -m http.server -d _site   # preview at http://localhost:8000/terraform-msgraph-modules/

@@ -1,0 +1,39 @@
+<h1>Versioning and releases</h1>
+<p class="lede">One version covers both generated catalogs and the verified modules. Versions follow the interface changes that the release gate detects: each release's notes summarise them, and the exact list is in <code>interface-changes.json</code>.</p>
+
+<h2 id="version-rules">Version rules</h2>
+<div class="tablewrap" role="region" tabindex="0" aria-label="Version rules">
+<table>
+  <thead><tr><th>Change</th><th>While the major version is 0</th><th>From 1.0.0</th></tr></thead>
+  <tbody>
+    <tr><td>Breaking change, accepted by a reviewed release decision with migration notes</td><td>minor</td><td>major</td></tr>
+    <tr><td>Compatible addition or other interface change</td><td>minor</td><td>minor</td></tr>
+    <tr><td>Fix without interface findings</td><td>patch</td><td>patch</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="current-status">Current status</h2>
+<p>The latest release is <b>{{TAG}}</b> ({{PUBLISHED}}). The public version line restarted at 0.5.0: the earlier tags v1.0.0 to v5.0.0 were withdrawn before anyone depended on them, because they overstated stability. 1.0.0 follows once the published stability criteria are met.</p>
+
+<h2 id="what-to-pin">What to pin</h2>
+<p>Pin a patch-only constraint such as <code>~&gt; {{MINOR}}.0</code> to take fixes only. Before a new minor version, read the release's breaking changes and migration notes; blocking changes are published only when a reviewed release decision accepts them.</p>
+<p>Every verified module needs Terraform {{TF_MIN}} or later, and {{PROVIDER_LINE}}. Each module page states its own requirements.</p>
+
+<h2 id="beta-modules">Beta modules</h2>
+<p>Microsoft Graph beta APIs are previews and can change incompatibly; Microsoft recommends v1.0 for production. See Microsoft's <a href="https://learn.microsoft.com/en-us/graph/versioning-and-support">versioning and support policy</a>.</p>
+
+<h2 id="release-integrity">Release integrity you can audit</h2>
+<p>Every published catalog passes these automated checks before its release tag is created.</p>
+<ol class="checks">
+  <li>Source manifests and cached metadata are checked against their recorded revisions and SHA-256 hashes.</li>
+  <li>Python regression tests cover schema reconciliation, type generation, classification, deterministic output, safe archive handling and atomic publication.</li>
+  <li><code>terraform fmt -check</code>, <code>terraform init -backend=false</code> and <code>terraform validate</code> run for every generated and verified module, against the exact provider versions in the release manifest.</li>
+  <li>Credential-free <code>terraform test</code> suites use provider mocks. They check Graph URL construction, typed request bodies, omission of null optional properties, validation failures and verified relationship behaviour, without contacting a tenant.</li>
+  <li>The release workflow rebuilds the archives from the tagged commit and requires their byte-level SHA-256 checksums to match the tested artifacts. It then creates a build provenance attestation for every release asset.</li>
+</ol>
+<p>A daily scheduled workflow rebuilds every published release and fails if a tag, an asset digest or an attestation no longer matches. <code>release-manifest.json</code> records the upstream metadata commit, provider versions, dependency hashes and the complete input fingerprint, so the inputs of any release can be audited.</p>
+<p class="note">Mock tests and schema validation do not prove that a caller has the required Microsoft Graph permissions, licence or tenant configuration. Each module's README links to the API documentation for those requirements. Live-tenant integration checks are separate and opt-in; a verified module's page states whether it has one.</p>
+
+<h2 id="release-assets">Release assets</h2>
+<p>Each release attaches {{ASSETS}}. <a href="/terraform-msgraph-modules/get-started/#verify-downloads">Verify what you downloaded</a> with the checksums and the build provenance attestations before you use an archive.</p>

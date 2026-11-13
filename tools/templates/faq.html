@@ -1,0 +1,27 @@
+<h1>FAQ</h1>
+<p class="lede">Short answers to the questions adopting teams ask most, each taken from the release README and policies.</p>
+<div class="faq">
+<h2 id="which-provider">Which Terraform provider do the modules use?</h2>
+<p>The official <code>microsoft/msgraph</code> provider. The modules add typed inputs, request shaping, documentation and tests on top of its generic <code>msgraph_resource</code>.</p>
+
+<h2 id="which-terraform-version">Which Terraform version do I need?</h2>
+<p>Every verified module requires Terraform {{TF_MIN}} or later, and {{PROVIDER_LINE}}. The Requirements section on each module page states its own Terraform and provider constraints.</p>
+
+<h2 id="beta-in-production">Can I use beta modules in production?</h2>
+<p>Beta modules carry Microsoft's preview status: the underlying APIs can change without notice. Prefer v1.0 modules where they exist, pin versions, and read each release's interface changes before upgrading.</p>
+
+<h2 id="first-init">Does a first <code>terraform init</code> download everything?</h2>
+<p>Yes. Terraform downloads the whole catalog once for every module block, even though each block uses one directory. Pin a version so that download happens once.</p>
+
+<h2 id="github-source">Can I consume the modules from GitHub instead of the Registry?</h2>
+<p>Yes. Use a Git source pinned to a release tag, for example <code>git::https://github.com/satolap/terraform-msgraph-modules.git//v1.0/&lt;graph-route&gt;?ref={{TAG}}</code>.</p>
+
+<h2 id="permissions">Which permissions do I need?</h2>
+<p>Verified module READMEs document the permissions they need. Generated module READMEs link to Microsoft's API documentation, which lists the permissions for each operation. Grant only what the modules you use require.</p>
+
+<h2 id="assurance-levels">What does "verified live-accepted" mean on a module page?</h2>
+<p>The module's README records a live tenant run that was accepted on the stated date and commit. "verified offline-only" means the module passed the offline checks (validation and mock tests) and has no recorded live run. The README's Assurance line is the source.</p>
+
+<h2 id="support-commitment">Is there a support commitment?</h2>
+<p>Support is public and community-based: GitHub issues for problems and module requests, and private vulnerability reporting with an acknowledgement within seven days. The repository states no other support commitment. See <a href="/terraform-msgraph-modules/support/">support and policies</a>.</p>
+</div>
