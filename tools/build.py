@@ -201,11 +201,10 @@ def slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
 
-def heading_ids(body: str) -> tuple[str, list[tuple[str, str]]]:
+def heading_ids(body: str) -> str:
     """Give README headings the ids github.com gives them (the Markdown API leaves them out), so links like
-    #inputs work; return the h2 headings for the "On this page" list."""
+    #inputs work and the "On this page" list can be built from the headings."""
     seen: dict[str, int] = {}
-    toc: list[tuple[str, str]] = []
 
     def add(m: re.Match) -> str:
         level, attrs, inner = m.group(1), m.group(2), m.group(3)
@@ -216,11 +215,9 @@ def heading_ids(body: str) -> tuple[str, list[tuple[str, str]]]:
         n = seen.get(base, 0)
         seen[base] = n + 1
         hid = base if n == 0 else f"{base}-{n}"
-        if level == "2":
-            toc.append((hid, text))
         return f'<h{level}{attrs} id="{html.escape(hid)}">{inner}</h{level}>'
 
-    return re.sub(r"<h([1-6])((?:\s[^>]*)?)>(.*?)</h\1>", add, body, flags=re.S), toc
+    return re.sub(r"<h([1-6])((?:\s[^>]*)?)>(.*?)</h\1>", add, body, flags=re.S)
 
 
 def wrap_tables(body: str) -> str:
@@ -251,11 +248,88 @@ def wrap_tables(body: str) -> str:
     return re.sub(r'<a [^>]*href="https://camo\.githubusercontent\.com/[^"]*"[^>]*>(<img [^>]*>)</a>', r"\1", body)
 
 
-def toc_nav(toc: list[tuple[str, str]]) -> str:
-    if len(toc) < 4:
+def outline(body: str) -> list[tuple[int, str, str]]:
+    """The h2 and h3 headings of a document that carry an id, in order: (level, id, text)."""
+    out = []
+    for m in re.finditer(r"<h([23])\b[^>]*\bid=\"([^\"]+)\"[^>]*>(.*?)</h\1>", body, flags=re.S):
+        text = html.unescape(re.sub(r"<[^>]+>", "", m.group(3))).strip()
+        if text:
+            out.append((int(m.group(1)), m.group(2), text))
+    return out
+
+
+def onpage_nav(items: list[tuple[int, str, str]]) -> str:
+    """The "On this page" sidebar: h2 entries with their h3s nested. Empty when a page has one heading or none."""
+    if len(items) < 2:
         return ""
-    items = "".join(f'<li><a href="#{html.escape(i)}">{html.escape(t)}</a></li>' for i, t in toc)
-    return f'<nav class="toc" aria-labelledby="toc-title"><p class="toc-title" id="toc-title">On this page</p><ol>{items}</ol></nav>'
+    parts, depth = [], 0
+    for level, hid, text in items:
+        if level == 3 and depth == 0:
+            if not parts:
+                continue  # an h3 before the first h2 has no parent entry
+            parts.append("<ol>"); depth = 1
+        elif level == 2 and depth == 1:
+            parts.append("</ol></li>"); depth = 0
+        elif level == 2 and parts:
+            parts.append("</li>")
+        link = f'<a href="#{html.escape(hid)}">{html.escape(text)}</a>'
+        parts.append(f"<li>{link}" if level == 2 else f"<li>{link}</li>")
+    parts.append("</ol></li>" if depth else "</li>")
+    return (f'<details class="menu"><summary>On this page</summary><nav class="onpage" aria-label="On this page">'
+            f'<p class="side-title" aria-hidden="true">On this page</p><ol>{"".join(parts)}</ol></nav></details>')
+
+
+# The section pages of the product documentation, in sidebar order: (path under BASE, title, template).
+PAGES = [
+    ("", "Overview", "overview.html"),
+    ("get-started/", "Get started", "get-started.html"),
+    ("modules/", "Verified modules", None),
+    ("versioning/", "Versioning and releases", "versioning.html"),
+    ("support/", "Support and policies", "support.html"),
+    ("faq/", "FAQ", "faq.html"),
+]
+# Fragments other pages and the README of the module repository link to on the product page; the overview
+# keeps an element with each id so those links still land somewhere relevant. --verify checks them.
+LEGACY_ANCHORS = ["top", "overview", "why", "modules", "verified-list", "start", "trust", "versions", "support", "faq"]
+
+
+def sidenav(current: str, mods: list[str]) -> str:
+    """The left sidebar: the section pages, then every verified module grouped by Graph area. `current` is
+    the path under BASE of the page being built ("" for the overview, "modules/<mod>/" for a module page)."""
+    def link(path: str, label: str) -> str:
+        cur = ' aria-current="page"' if path == current else ""
+        return f'<li><a href="{BASE}/{path}"{cur}>{label}</a></li>'
+
+    parts = [f'<nav class="sidenav" aria-label="Documentation"><ul class="pages">']
+    parts += [link(p, html.escape(t)) for p, t, _ in PAGES]
+    parts.append("</ul>")
+    by: dict[str, list[str]] = {}
+    for m in mods:
+        by.setdefault(group_of(m), []).append(m)
+    for g in [g for g, _ in GROUPS] + ["Other"]:
+        if g in by:
+            parts.append(f'<p class="nav-group">{html.escape(g)}</p><ul class="mods">')
+            parts += [link(f"modules/{m}/", f"<code>{html.escape(short(m))}</code>") for m in by[g]]
+            parts.append("</ul>")
+    parts.append("</nav>")
+    return "".join(parts)
+
+
+def layout(title: str, desc: str, current: str, body: str, mods: list[str], rel: dict, cls: str = "") -> str:
+    """A documentation page: sticky header, left navigation, the document, "On this page", footer. On narrow
+    screens the sidebars are <details> menus above the document (see static/style.css)."""
+    right = onpage_nav(outline(body))
+    return (head(title, desc, SITE_URL + current) + "\n" + HEADER + f"""
+<div class="wrap docs">
+  <aside class="side left" aria-label="Documentation menu">
+    <details class="menu"><summary>Documentation</summary>{sidenav(current, mods)}</details>
+  </aside>
+  {f'<aside class="side right" aria-label="Page outline">{right}</aside>' if right else ''}
+  <main id="main" class="doc{(' ' + cls) if cls else ''}">
+{body}
+  </main>
+</div>
+""" + footer(rel))
 
 
 def meta_desc(text: str, fallback: str, limit: int = 160) -> str:
@@ -314,13 +388,9 @@ HEADER = f"""<a class="skip" href="#main">Skip to content</a>
       <span class="sep" aria-hidden="true">/</span>
       <a href="{BASE}/">terraform-msgraph-modules</a>
     </span>
-    <nav class="links" aria-label="Sections">
-      <a href="{BASE}/modules/">Verified modules</a>
-      <a href="{BASE}/#start">Get started</a>
-      <a href="{BASE}/#trust">Release integrity</a>
-      <a href="{BASE}/#versions">Versioning</a>
-      <a href="{BASE}/#support">Support</a>
-      <a href="{BASE}/#faq">FAQ</a>
+    <nav class="links" aria-label="Project links">
+      <a href="https://registry.terraform.io/modules/satolap/modules/msgraph">Terraform Registry</a>
+      <a href="https://github.com/{REPO}/releases">Releases</a>
       <a href="https://github.com/{REPO}">GitHub</a>
     </nav>
   </div>
@@ -340,28 +410,22 @@ def footer(rel: dict) -> str:
 """
 
 
-def group_lists(mods: list[str], info: dict, tag: str, with_summary: bool) -> str:
+def catalog_groups(mods: list[str], info: dict) -> str:
+    """The catalog: one section per Graph area with a card per module."""
     by = {}
     for m in mods:
         by.setdefault(group_of(m), []).append(m)
-    order = [g for g, _ in GROUPS] + ["Other"]
-    parts = ['<div class="mods">' if not with_summary else '<div class="catalog">']
-    for g in order:
+    parts = ['<div class="catalog">']
+    for g in [g for g, _ in GROUPS] + ["Other"]:
         if g not in by:
             continue
-        if with_summary:
-            parts.append(f'<section class="cat"><h2 id="{slug(g)}">{html.escape(g)}</h2><div class="cards">')
-            for m in by[g]:
-                s, a = info[m]
-                badge = f'<span class="badge{" live" if "live-accepted" in a else ""}">{html.escape(a)}</span>' if a else ""
-                parts.append(f'<article class="card mod"><h3><a href="{page_url(m)}"><code>{html.escape(short(m))}</code></a></h3>'
-                             f'<p class="path">verified/{html.escape(m)}</p>{badge}<p>{md_inline(card_text(s))}</p></article>')
-            parts.append("</div></section>")
-        else:
-            parts.append(f'      <div class="group"><h4>{html.escape(g)}</h4><ul>')
-            for m in by[g]:
-                parts.append(f'        <li><a href="{page_url(m)}"><code>{html.escape(short(m))}</code></a></li>')
-            parts.append("      </ul></div>")
+        parts.append(f'<section class="cat"><h2 id="{slug(g)}">{html.escape(g)}</h2><div class="cards">')
+        for m in by[g]:
+            s, a = info[m]
+            badge = f'<span class="badge{" live" if "live-accepted" in a else ""}">{html.escape(a)}</span>' if a else ""
+            parts.append(f'<article class="card mod"><h3><a href="{page_url(m)}"><code>{html.escape(short(m))}</code></a></h3>'
+                         f'<p class="path">verified/{html.escape(m)}</p>{badge}<p>{md_inline(card_text(s))}</p></article>')
+        parts.append("</div></section>")
     parts.append("</div>")
     return "\n".join(parts)
 
@@ -473,14 +537,14 @@ def hub(rel: dict, mods: list[str], floors: dict[str, str], reqs: dict[str, dict
         {facts}
         {areas}
         {status}
-        <div class="cta"><a class="btn primary" href="{html.escape(href)}">Documentation</a> <a class="btn" href="{html.escape(href)}#start">Get started</a> {links}</div>
+        <div class="cta"><a class="btn primary" href="{html.escape(href)}">Documentation</a> <a class="btn" href="{html.escape(href)}get-started/">Get started</a> {links}</div>
       </div>
     </article>""")
     return (head("satolap: open-source infrastructure as code", "Open-source projects by satolap, including terraform-msgraph-modules: Terraform modules for Microsoft Graph.",
                  "https://satolap.github.io/") + "\n" + HUB_HEADER + f"""
-<main id="main">
-  <div class="wrap hub-hero">
-    <img class="hero-logo" src="/logo.svg" width="200" height="175" alt="">
+<main id="main" class="wrap hub">
+  <div class="hub-hero">
+    <img class="hero-logo" src="/logo.svg" width="128" height="112" alt="">
     <div>
       <p class="eyebrow">satolap</p>
       <h1>Open-source infrastructure-as-code projects.</h1>
@@ -488,10 +552,8 @@ def hub(rel: dict, mods: list[str], floors: dict[str, str], reqs: dict[str, dict
     </div>
   </div>
   <section id="products">
-    <div class="wrap">
-      <h2>Products</h2>
-      {''.join(cards)}
-    </div>
+    <h2>Products</h2>
+    {''.join(cards)}
   </section>
 </main>
 """ + hub_footer())
@@ -508,7 +570,8 @@ GUARD = re.compile(r"benhaspalace/GraphForm|graphform-host|SchoggiLab|lindt|[A-Z
 
 
 def verify() -> int:
-    """Every root-relative link resolves inside _site, and no page names private sources or loads scripts."""
+    """Every root-relative link resolves inside _site, every same-page fragment link finds its id, the overview
+    keeps the ids other pages link to, and no page names private sources or loads scripts."""
     import glob
     bad, n = [], 0
     for f in glob.glob(os.path.join(SITE, "**", "*.html"), recursive=True):
@@ -516,12 +579,21 @@ def verify() -> int:
         rel = os.path.relpath(f, SITE)
         for m in GUARD.finditer(text):
             bad.append(f"{rel}: forbidden content {m.group(0)!r}")
+        ids = set(re.findall(r'\sid="([^"]+)"', text))
+        for h in re.findall(r'href="#([^"]+)"', text):
+            n += 1
+            if html.unescape(h) not in ids:
+                bad.append(f"{rel}: fragment link #{h} has no target")
         for h in re.findall(r'(?:href|src)="(/[^"#?]*)', text):
             n += 1
             p = h.lstrip("/")
             p = p + "index.html" if (p == "" or p.endswith("/")) else p
             if not os.path.exists(os.path.join(SITE, p)):
                 bad.append(f"{rel}: broken link {h}")
+        if rel == os.path.join(BASE.strip("/"), "index.html"):
+            for a in LEGACY_ANCHORS:
+                if a not in ids:
+                    bad.append(f"{rel}: legacy anchor #{a} is gone (other pages link to it)")
     print(f"verified {n} internal links; {len(bad)} problems")
     for b in bad[:40]:
         print("  " + b)
@@ -559,7 +631,8 @@ def audit() -> int:
              ("code-comment", "code-bg", 4.5), ("code-keyword", "code-bg", 4.5), ("code-string", "code-bg", 4.5),
              ("code-entity", "code-bg", 4.5), ("code-constant", "code-bg", 4.5), ("code-tag", "code-bg", 4.5),
              ("ok", "surface", 4.5), ("warn", "surface", 4.5), ("ok", "bg", 4.5), ("warn", "bg", 4.5),
-             ("line", "surface", 1.3)]
+             ("muted", "code-bg", 4.5), ("accent", "code-bg", 4.5),
+             ("line", "surface", 1.3), ("line", "bg", 1.3), ("line", "code-bg", 1.3), ("line-strong", "bg", 1.3)]
     print("## Colour contrast (WCAG 2.2: 4.5:1 for text, 3:1 for large text and UI)")
     problems = []
     for t, tok in themes.items():
@@ -577,8 +650,21 @@ def audit() -> int:
             self.main = False; self.lang = False; self.title = ""; self._t = False; self.desc = ""
             self.viewport = False; self.skip = False; self.navs_unnamed = 0; self.ids = []; self.in_md = 0
             self.h_text = []; self._h = None; self.regions_unnamed = 0; self.landmarks = set()
+            self.navs = []; self.current = 0; self.asides_unnamed = 0; self.details_open = 0; self.details_nosummary = 0
+            self.h2_in_main = 0; self.in_main = False; self.onpage_links = 0
+            self.in_onpage = False
         def handle_starttag(self, tag, attrs):
             a = dict(attrs)
+            if tag == "details": self.details_open += 1; self._summary = False
+            if tag == "summary": self._summary = True
+            if tag == "aside": self.landmarks.add("aside")
+            if tag == "aside" and not (a.get("aria-label") or a.get("aria-labelledby")): self.asides_unnamed += 1
+            if tag == "nav": self.navs.append(a.get("aria-label") or "")
+            if tag == "nav" and a.get("aria-label") == "On this page": self.in_onpage = True
+            if tag == "a" and self.in_onpage: self.onpage_links += 1
+            if tag == "a" and a.get("aria-current") == "page": self.current += 1
+            if tag == "main": self.in_main = True
+            if tag == "h2" and self.in_main: self.h2_in_main += 1
             if re.fullmatch(r"h[1-6]", tag): self.h.append(int(tag[1])); self._h = []
             if tag == "img" and "alt" not in a: self.img_noalt += 1
             if tag == "a": self._a = [a.get("aria-label") or ""]; self._href = a.get("href")
@@ -595,6 +681,11 @@ def audit() -> int:
             if tag == "article" and "md" in (a.get("class") or "").split(): self.in_md += 1
             if tag == "a" and a.get("class") == "skip" and a.get("href") == "#main": self.skip = True
         def handle_endtag(self, tag):
+            if tag == "details":
+                self.details_open -= 1
+                if not self._summary: self.details_nosummary += 1
+            if tag == "nav" and self.in_onpage: self.in_onpage = False
+            if tag == "main": self.in_main = False
             if tag == "a" and self._a is not None:
                 self.links.append(("".join(self._a).strip(), self._href, bool(self.in_md))); self._a = None
             if tag == "title": self._t = False
@@ -637,6 +728,15 @@ def audit() -> int:
         if p.regions_unnamed: issues.append(f"{p.regions_unnamed} region without a name")
         if not p.main: issues.append("no <main>")
         if {"header", "footer"} - p.landmarks: issues.append("missing header or footer landmark")
+        if p.asides_unnamed: issues.append(f"{p.asides_unnamed} aside without a name")
+        if p.details_nosummary: issues.append(f"{p.details_nosummary} details without a summary")
+        # Documentation layout (every page under the product path): a named "Documentation" nav that marks the
+        # current page, and an "On this page" nav whenever the document has two or more h2 headings
+        if rel.startswith(BASE.strip("/") + os.sep):
+            if "Documentation" not in p.navs: issues.append("no Documentation nav")
+            elif p.current != 1: issues.append(f"{p.current} links marked aria-current=page (expected 1)")
+            if p.h2_in_main >= 2 and "On this page" not in p.navs: issues.append("no On this page nav")
+            if "On this page" in p.navs and p.onpage_links < 2: issues.append("On this page nav with fewer than 2 links")
         if not p.skip: issues.append("no skip link")
         if not p.lang: issues.append("no lang")
         if not p.viewport: issues.append("no viewport meta")
@@ -689,21 +789,19 @@ def main() -> int:
         info[m] = summary_and_assurance(md)
         reqs[m] = requirements(md)
         md_body = re.sub(r"\A\s*#\s+[^\n]*\n", "", md, count=1)  # the page has its own title
-        body, toc = heading_ids(sanitize(render(rewrite_links(md_body, m, tag, modset))))
-        pages[m] = (wrap_tables(body), toc)
+        body = heading_ids(sanitize(render(rewrite_links(md_body, m, tag, modset))))
+        pages[m] = wrap_tables(body)
         print(f"  {m}")
     floors = floor_versions(reqs)
     for m in mods:
-        body, toc = pages[m]
+        body = pages[m]
         src = f"satolap/modules/msgraph//verified/{m}"
         title = f"verified/{m}"
         desc = meta_desc(info[m][0], f"Verified Terraform module verified/{m} for Microsoft Graph: inputs, permissions and usage.")
-        crumbs = (f'<a href="{BASE}/">terraform-msgraph-modules</a> / <a href="{BASE}/modules/">Verified modules</a> / '
+        crumbs = (f'<a href="{BASE}/modules/">Verified modules</a> / '
                   f'<a href="{BASE}/modules/#{slug(group_of(m))}">{html.escape(group_of(m))}</a>')
         badge = f'<span class="badge{" live" if "live-accepted" in info[m][1] else ""}">{html.escape(info[m][1])}</span>' if info[m][1] else ""
-        page = (head(f"{short(m)}: verified module", desc, f"https://satolap.github.io{page_url(m)}") + "\n" + HEADER + f"""
-<main id="main" class="wrap modpage">
-  <nav class="crumbs" aria-label="Breadcrumb">{crumbs}</nav>
+        doc = f"""<nav class="crumbs" aria-label="Breadcrumb">{crumbs}</nav>
   <h1><code>{html.escape(title)}</code></h1>
   {badge}
   {f'<p class="sub">{md_inline(info[m][0])}</p>' if info[m][0] else ""}
@@ -715,56 +813,57 @@ def main() -> int:
     <p class="links"><a href="https://github.com/{REPO}/tree/{tag}/verified/{m}">Source at {tag}</a> · <a href="https://registry.terraform.io/modules/satolap/modules/msgraph">Terraform Registry</a> · <a href="https://github.com/{REPO}/releases/tag/{tag}">Release notes</a> · <a href="https://github.com/{REPO}/issues/new/choose">Report a problem</a></p>
   </div>
   {module_facts(m, info[m][1], reqs[m], rel)}
-  {toc_nav(toc)}
   <article class="md">
 {body}
   </article>
-  {module_nav(m, mods)}
-</main>
-""" + footer(rel))
-        write(os.path.join(OUT, "modules", m, "index.html"), page)
-    catalog = (head("Verified modules: terraform-msgraph-modules", f"The {len(mods)} reviewed, verified Terraform modules for Microsoft Graph in {tag}.", SITE_URL + "modules/")
-               + "\n" + HEADER + f"""
-<main id="main" class="wrap modpage">
-  <nav class="crumbs" aria-label="Breadcrumb"><a href="{BASE}/">terraform-msgraph-modules</a> / <span aria-current="page">Verified modules</span></nav>
-  <h1>Verified modules</h1>
-  <p class="sub">{len(mods)} reviewed modules in <a href="{rel['url']}">{tag}</a> ({rel['published'][:10]}) across {len(area_counts(mods))} Microsoft Graph areas. Each page shows the module's README from the release: inputs, permissions, licence requirements, lifecycle notes and its assurance level, plus the module block to copy. Every module needs Terraform {html.escape(floors.get('terraform', '1.11.0'))} or later, and {provider_line(reqs, rel['provider_tested'])}; each page states its own requirements. New here? Read <a href="{BASE}/#start">Get started</a> first.</p>
-{area_index(mods)}
-{group_lists(mods, info, tag, True)}
-</main>
-""" + footer(rel))
-    write(os.path.join(OUT, "modules", "index.html"), catalog)
+  {module_nav(m, mods)}"""
+        write(os.path.join(OUT, "modules", m, "index.html"),
+              layout(f"{short(m)}: verified module", desc, f"modules/{m}/", doc, mods, rel, "modpage"))
+    catalog = f"""<h1>Verified modules</h1>
+  <p class="lede">{len(mods)} reviewed modules in <a href="{rel['url']}">{tag}</a> ({rel['published'][:10]}) across {len(area_counts(mods))} Microsoft Graph areas.</p>
+  <p class="sub">Each page shows the module's README from the release: inputs, permissions, licence requirements, lifecycle notes and its assurance level, plus the module block to copy. Every module needs Terraform {html.escape(floors.get('terraform', '1.11.0'))} or later, and {provider_line(reqs, rel['provider_tested'])}; each page states its own requirements. New here? Read <a href="{BASE}/get-started/">Get started</a> first.</p>
+{catalog_groups(mods, info)}"""
+    write(os.path.join(OUT, "modules", "index.html"),
+          layout("Verified modules: terraform-msgraph-modules", f"The {len(mods)} reviewed, verified Terraform modules for Microsoft Graph in {tag}, grouped by Graph area.",
+                 "modules/", catalog, mods, rel, "modpage"))
     c = rel["counts"]
-    home = open(os.path.join(TEMPLATES, "home.html"), encoding="utf-8").read()
     repl = {
-        "{{HEAD}}": head("terraform-msgraph-modules: Terraform modules for Microsoft Graph",
-                         "Versioned, tested Terraform modules for Microsoft Graph v1.0 and beta on the microsoft/msgraph provider, plus verified modules for Entra ID governance.", SITE_URL),
-        "{{HEADER}}": HEADER, "{{FOOTER}}": footer(rel), "{{TAG}}": tag, "{{MINOR}}": minor,
-        "{{PUBLISHED}}": rel["published"][:10],
+        "{{TAG}}": tag, "{{MINOR}}": minor, "{{PUBLISHED}}": rel["published"][:10],
         "{{V1_COUNT}}": str(c["v1.0"] or "–"), "{{BETA_COUNT}}": str(c["beta"] or "–"),
         "{{VERIFIED_COUNT}}": str(c["verified"] or len(mods)),
         "{{AREA_COUNT}}": str(len(area_counts(mods))),
         "{{AREA_INDEX}}": area_index(mods, f"{BASE}/modules/", "Verified coverage by Graph area"),
-        "{{VERIFIED_GROUPS}}": group_lists(mods, info, tag, False),
         "{{TF_MIN}}": floors.get("terraform", "1.11.0"), "{{PROVIDER_LINE}}": provider_line(reqs, rel["provider_tested"]),
         "{{PROVIDER_TESTED}}": rel["provider_tested"] or "the version in release-manifest.json",
         "{{ASSETS}}": ", ".join(f"<code>{html.escape(a)}</code>" for a in rel["assets"]) or "the release archives",
     }
-    for k, v in repl.items():
-        home = home.replace(k, v)
-    left = re.findall(r"\{\{[A-Z_]+\}\}", home)
-    if left:
-        raise SystemExit(f"unfilled placeholders: {left}")
-    write(os.path.join(OUT, "index.html"), home)
+    descs = {
+        "": "Versioned, tested Terraform modules for Microsoft Graph v1.0 and beta on the microsoft/msgraph provider, plus verified modules for Entra ID governance.",
+        "get-started/": f"Configure the microsoft/msgraph provider, reference a terraform-msgraph-modules module pinned to {tag}, initialise and plan, with a complete example.",
+        "versioning/": "How terraform-msgraph-modules versions releases on the 0.x line and from 1.0.0, what to pin, beta module status and the release integrity checks.",
+        "support/": "Where to report problems and request modules for terraform-msgraph-modules, vulnerability reporting, contributing, licensing and accessibility.",
+        "faq/": "Answers on the provider, Terraform versions, beta modules in production, the first terraform init, Git sources, permissions and assurance levels.",
+    }
+    for path, title, template in PAGES:
+        if not template:
+            continue
+        body = open(os.path.join(TEMPLATES, template), encoding="utf-8").read()
+        for k, v in repl.items():
+            body = body.replace(k, v)
+        left = re.findall(r"\{\{[A-Z_]+\}\}", body)
+        if left:
+            raise SystemExit(f"{template}: unfilled placeholders {left}")
+        full = "terraform-msgraph-modules: Terraform modules for Microsoft Graph" if not path else f"{title}: terraform-msgraph-modules"
+        write(os.path.join(OUT, path, "index.html"), layout(full, descs[path], path, body, mods, rel))
     write(os.path.join(SITE, "index.html"), hub(rel, mods, floors, reqs))
     write(os.path.join(SITE, "404.html"), (head("Page not found: satolap", "This page does not exist. Find a verified module, the quick start or the satolap home page instead.", "https://satolap.github.io/404.html")
           + "\n" + HUB_HEADER + f"""
-<main id="main" class="wrap modpage">
+<main id="main" class="wrap hub">
   <h1>Page not found</h1>
   <p class="sub">The page may have moved when a module was renamed in a new release. Try one of these:</p>
   <ul>
     <li><a href="{BASE}/modules/">Verified modules</a>: all {len(mods)} modules in {tag}, grouped by Graph area</li>
-    <li><a href="{BASE}/#start">Quick start</a> for terraform-msgraph-modules</li>
+    <li><a href="{BASE}/get-started/">Get started</a> with terraform-msgraph-modules</li>
     <li><a href="/">satolap home page</a></li>
   </ul>
 </main>

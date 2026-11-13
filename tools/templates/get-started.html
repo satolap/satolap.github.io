@@ -1,0 +1,57 @@
+<h1>Get started</h1>
+<p class="lede">Three steps, taken from the release README. Verified modules need Terraform {{TF_MIN}} or later, and {{PROVIDER_LINE}}.</p>
+
+<h2 id="configure-the-provider">1. Configure the provider</h2>
+<p>The provider documents how to <a href="https://registry.terraform.io/providers/microsoft/msgraph/latest/docs">authenticate</a>: Azure CLI, managed identity, service principal or OpenID Connect. Grant only the Graph permissions the modules you use require; each verified module's README lists them.</p>
+
+<h2 id="reference-a-module">2. Reference a module, pinned to a release</h2>
+<p>Module sources take three forms. <code>&lt;module-path&gt;</code> is the path shown on a verified module's page; <code>&lt;graph-route&gt;</code> is a generated module's directory in its catalog.</p>
+<pre tabindex="0" role="region" aria-label="Module source formats">satolap/modules/msgraph//v1.0/&lt;graph-route&gt;
+satolap/modules/msgraph//beta/&lt;graph-route&gt;
+satolap/modules/msgraph//verified/&lt;module-path&gt;</pre>
+<p>On the 0.x line, <code>~&gt; {{MINOR}}.0</code> takes fixes only. Read the migration notes in the release before you move to a new minor version.</p>
+
+<h2 id="initialise-and-plan">3. Initialise and plan</h2>
+<p>Terraform downloads the whole catalog once per module block on the first <code>terraform init</code>, so pin a version and that download happens once. Review the plan before you apply.</p>
+
+<h2 id="complete-example">A complete example</h2>
+<p>A root module that configures the provider and creates a security group with the verified <a href="/terraform-msgraph-modules/modules/groups/"><code>groups</code></a> module:</p>
+<pre tabindex="0" role="region" aria-label="Example Terraform configuration">terraform {
+  required_providers {
+    msgraph = {
+      source  = "microsoft/msgraph"
+      version = "&gt;= 0.4.0, &lt; 1.0.0"
+    }
+  }
+}
+
+provider "msgraph" {}
+
+module "engineering_group" {
+  source  = "satolap/modules/msgraph//verified/groups"
+  version = "~&gt; {{MINOR}}.0"
+
+  # Inputs use Microsoft Graph's property names.
+  displayName     = "Engineering"
+  mailNickname    = "engineering"
+  securityEnabled = true
+}</pre>
+
+<h2 id="from-github">From GitHub instead of the Registry</h2>
+<p>A Git source pins the same release by its tag:</p>
+<pre tabindex="0" role="region" aria-label="Git module source">git::https://github.com/satolap/terraform-msgraph-modules.git//v1.0/&lt;graph-route&gt;?ref={{TAG}}</pre>
+<p>For evaluation only, <code>?ref=latest</code> follows new releases, breaking changes included. Pin production configurations to a version.</p>
+
+<h2 id="verify-downloads">Verify what you downloaded</h2>
+<p>Each release attaches {{ASSETS}}. Check the files you downloaded, then their build provenance attestations:</p>
+<pre tabindex="0" role="region" aria-label="Release verification commands">sha256sum -c --ignore-missing SHA256SUMS
+gh attestation verify graphmodules-verified-modules.tar.gz \
+  --repo satolap/terraform-msgraph-modules</pre>
+<p>How those assets are built and checked is described under <a href="/terraform-msgraph-modules/versioning/#release-integrity">release integrity</a>.</p>
+
+<h2 id="next-steps">Next steps</h2>
+<ul>
+  <li>Browse the <a href="/terraform-msgraph-modules/modules/">verified modules</a>; each page has the module block to copy, its inputs, permissions and lifecycle notes.</li>
+  <li>Read <a href="/terraform-msgraph-modules/versioning/">versioning and releases</a> before you move between minor versions.</li>
+  <li>Find help under <a href="/terraform-msgraph-modules/support/">support and policies</a>.</li>
+</ul>

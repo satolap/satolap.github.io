@@ -1,0 +1,23 @@
+<h1>Support and policies</h1>
+<p class="lede">Support runs in the open, on GitHub. The public repository publishes these channels and commitments.</p>
+
+<h2 id="problems-and-module-requests">Problems and module requests</h2>
+<p>Open a <a href="https://github.com/satolap/terraform-msgraph-modules/issues/new/choose">GitHub issue</a> with the release tag and module path, your Terraform and provider versions, a minimal configuration, the expected and actual result, and sanitised logs. Templates exist for bug reports, module requests and accessibility barriers.</p>
+
+<h2 id="security">Security</h2>
+<p>Report a suspected vulnerability privately through <a href="https://github.com/satolap/terraform-msgraph-modules/security/advisories/new">GitHub's vulnerability reporting</a>, never in a public issue. Expect an initial acknowledgement within seven days. Fixes are applied to the latest release and <code>main</code>; older tags are immutable, so upgrade after a fix is published. Read the <a href="https://github.com/satolap/terraform-msgraph-modules/blob/{{TAG}}/SECURITY.md">security policy</a>.</p>
+
+<h2 id="provider-and-graph-issues">Provider and Graph issues</h2>
+<p>Problems in the <code>microsoft/msgraph</code> provider or in the Microsoft Graph API itself belong upstream, in the <a href="https://github.com/microsoft/terraform-provider-msgraph/issues">provider's issue tracker</a>.</p>
+
+<h2 id="changing-a-module">Changing a module</h2>
+<p>The module trees are published from a validated pipeline, so pull requests that edit them cannot be accepted: open an issue describing the change instead. Pull requests are welcome for the public documentation and release tooling. See <a href="https://github.com/satolap/terraform-msgraph-modules/blob/{{TAG}}/CONTRIBUTING.md">CONTRIBUTING.md</a>.</p>
+
+<h2 id="licensing">Licensing</h2>
+<p>The code and verified modules are available under the <a href="https://github.com/satolap/terraform-msgraph-modules/blob/{{TAG}}/LICENSE">MIT License</a>. Generated interfaces derive from Microsoft Graph metadata (MIT) and documentation (CC BY 4.0); <a href="https://github.com/satolap/terraform-msgraph-modules/blob/{{TAG}}/NOTICE">NOTICE</a> lists the upstream notices.</p>
+
+<h2 id="accessibility">Accessibility</h2>
+<p>The documentation is plain Markdown with a logical heading structure, descriptive links and text alternatives. Report a barrier with the <a href="https://github.com/satolap/terraform-msgraph-modules/issues/new?template=accessibility_report.yml">accessibility report</a> template; the <a href="https://github.com/satolap/terraform-msgraph-modules/blob/{{TAG}}/ACCESSIBILITY.md">accessibility statement</a> lists known limitations.</p>
+
+<h2 id="support-commitment">Support commitment</h2>
+<p>Support is public and community-based: GitHub issues for problems and module requests, and private vulnerability reporting with an acknowledgement within seven days. The repository states no other support commitment. Security fixes go to the latest release; see <a href="/terraform-msgraph-modules/versioning/">versioning and releases</a> for what to pin.</p>
