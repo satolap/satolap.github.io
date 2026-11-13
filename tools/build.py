@@ -67,7 +67,10 @@ def latest_release() -> dict:
     for key in ("v1.0", "beta", "verified"):
         m = re.search(rf"^- {re.escape(key)}: (\d+) modules", body, re.M)
         counts[key] = int(m.group(1)) if m else None
-    return {"tag": rel["tag_name"], "published": rel.get("published_at", ""), "url": rel["html_url"], "counts": counts}
+    m = re.search(r"^- Tested provider `microsoft/msgraph`: `([^`]+)`", body, re.M)
+    return {"tag": rel["tag_name"], "published": rel.get("published_at", ""), "url": rel["html_url"], "counts": counts,
+            "provider_tested": m.group(1) if m else "",
+            "assets": sorted(a["name"] for a in rel.get("assets", []))}
 
 
 def verified_modules(tag: str) -> list[str]:
@@ -135,13 +138,63 @@ def summary_and_assurance(md: str) -> tuple[str, str]:
         break
     summ = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", summ)  # plain text for cards
     summ = re.sub(r"(\*\*|__)(.+?)\1", r"\2", summ)
-    assurance = assurance.replace("`", "")
-    if len(summ) > 230:  # cards stay scannable; the module page has the full text
-        cut = summ[:230].rsplit(" ", 1)[0].rstrip(",;:")
-        if cut.count("`") % 2:
-            cut = cut.rsplit("`", 1)[0].rstrip()
-        summ = cut + "…"
-    return summ, assurance
+    return summ, assurance.replace("`", "")
+
+
+def card_text(summ: str, limit: int = 230) -> str:
+    """Cards stay scannable; the module page has the full text."""
+    if len(summ) <= limit:
+        return summ
+    cut = summ[:limit].rsplit(" ", 1)[0].rstrip(",;:")
+    if cut.count("`") % 2:
+        cut = cut.rsplit("`", 1)[0].rstrip()
+    return cut + "…"
+
+
+def requirements(md: str) -> dict[str, str]:
+    """The minimum Terraform and provider versions from the README's Requirements table."""
+    sec = re.search(r"^## Requirements\s*\n(.*?)(?=^## |\Z)", md, re.M | re.S)
+    if not sec:
+        return {}
+    return {n: v.strip() for n, v in re.findall(r"^\|\s*(terraform|msgraph)\s*\|\s*([^|]+?)\s*\|", sec.group(1), re.M)}
+
+
+def version_key(constraint: str) -> tuple[int, ...]:
+    m = re.search(r"(\d+(?:\.\d+)*)", constraint)
+    return tuple(int(x) for x in m.group(1).split(".")) if m else ()
+
+
+def satisfies(constraint: str, version: str) -> bool:
+    """Does a version meet a Terraform constraint of the forms the READMEs use (>=, >, <=, <, =, ~>)?"""
+    v = version_key(version)
+    for op, val in re.findall(r"(>=|<=|>|<|=|~>)\s*(\d+(?:\.\d+)*)", constraint):
+        c = version_key(val)
+        if op == ">=" and not v >= c or op == ">" and not v > c or op == "<=" and not v <= c or op == "<" and not v < c:
+            return False
+        if op == "=" and v != c:
+            return False
+        if op == "~>" and not (v >= c and v[:len(c) - 1] == c[:-1]):
+            return False
+    return True
+
+
+def provider_line(reqs: dict[str, dict[str, str]], tested: str) -> str:
+    """One true sentence about provider versions: the tested version satisfies every verified module, or not."""
+    cons = [r["msgraph"] for r in reqs.values() if r.get("msgraph")]
+    if tested and cons and all(satisfies(c, tested) for c in cons):
+        return (f"<code>microsoft/msgraph</code> {html.escape(tested)}, the version the release was tested with, "
+                f"satisfies every verified module's provider constraint")
+    return "each module page states the <code>microsoft/msgraph</code> versions it accepts"
+
+
+def floor_versions(reqs: dict[str, dict[str, str]]) -> dict[str, str]:
+    """Per tool, the highest minimum across modules: what a root needs to use every verified module."""
+    out = {}
+    for name in ("terraform", "msgraph"):
+        vals = [r[name] for r in reqs.values() if r.get(name)]
+        if vals:
+            out[name] = re.search(r"\d+(?:\.\d+)*", max(vals, key=version_key)).group(0)
+    return out
 
 
 def slug(text: str) -> str:
@@ -263,9 +316,10 @@ HEADER = f"""<a class="skip" href="#main">Skip to content</a>
     </span>
     <nav class="links" aria-label="Sections">
       <a href="{BASE}/modules/">Verified modules</a>
-      <a href="{BASE}/#start">Quick start</a>
+      <a href="{BASE}/#start">Get started</a>
       <a href="{BASE}/#trust">Release integrity</a>
       <a href="{BASE}/#versions">Versioning</a>
+      <a href="{BASE}/#support">Support</a>
       <a href="{BASE}/#faq">FAQ</a>
       <a href="https://github.com/{REPO}">GitHub</a>
     </nav>
@@ -276,7 +330,8 @@ HEADER = f"""<a class="skip" href="#main">Skip to content</a>
 def footer(rel: dict) -> str:
     return f"""<footer>
   <div class="wrap">
-    <span>Built from release <a href="{rel['url']}">{rel['tag']}</a>. MIT licensed; Microsoft Graph metadata is used under its MIT licence (<a href="https://github.com/{REPO}/blob/main/NOTICE">NOTICE</a>).</span>
+    <span>Built from release <a href="{rel['url']}">{rel['tag']}</a> ({rel['published'][:10]}). MIT licensed; Microsoft Graph metadata is used under its MIT licence (<a href="https://github.com/{REPO}/blob/{rel['tag']}/NOTICE">NOTICE</a>).</span>
+    <nav aria-label="Project policies"><a href="https://github.com/{REPO}/blob/{rel['tag']}/SECURITY.md">Security policy</a> · <a href="https://github.com/{REPO}/blob/{rel['tag']}/ACCESSIBILITY.md">Accessibility statement</a> · <a href="https://github.com/{REPO}/blob/{rel['tag']}/CONTRIBUTING.md">Contributing</a> · <a href="https://github.com/{REPO}/blob/{rel['tag']}/CODE_OF_CONDUCT.md">Code of conduct</a></nav>
     <span>An independent open-source project, not affiliated with or endorsed by Microsoft or HashiCorp.</span>
   </div>
 </footer>
@@ -300,7 +355,7 @@ def group_lists(mods: list[str], info: dict, tag: str, with_summary: bool) -> st
                 s, a = info[m]
                 badge = f'<span class="badge{" live" if "live-accepted" in a else ""}">{html.escape(a)}</span>' if a else ""
                 parts.append(f'<article class="card mod"><h3><a href="{page_url(m)}"><code>{html.escape(short(m))}</code></a></h3>'
-                             f'<p class="path">verified/{html.escape(m)}</p>{badge}<p>{md_inline(s)}</p></article>')
+                             f'<p class="path">verified/{html.escape(m)}</p>{badge}<p>{md_inline(card_text(s))}</p></article>')
             parts.append("</div></section>")
         else:
             parts.append(f'      <div class="group"><h4>{html.escape(g)}</h4><ul>')
@@ -311,14 +366,56 @@ def group_lists(mods: list[str], info: dict, tag: str, with_summary: bool) -> st
     return "\n".join(parts)
 
 
-def area_index(mods: list[str]) -> str:
-    """Jump links to each Graph area on the catalog, with module counts."""
+def area_counts(mods: list[str]) -> list[tuple[str, int]]:
     counts: dict[str, int] = {}
     for m in mods:
         counts[group_of(m)] = counts.get(group_of(m), 0) + 1
-    items = "".join(f'<li><a href="#{slug(g)}">{html.escape(g)}</a> <span class="n">{counts[g]}</span></li>'
-                    for g in [g for g, _ in GROUPS] + ["Other"] if g in counts)
-    return f'<nav class="toc areas" aria-labelledby="areas-title"><p class="toc-title" id="areas-title">Graph areas</p><ul>{items}</ul></nav>'
+    return [(g, counts[g]) for g in [g for g, _ in GROUPS] + ["Other"] if g in counts]
+
+
+def area_index(mods: list[str], prefix: str = "", title: str = "Graph areas") -> str:
+    """Jump links to each Graph area on the catalog, with module counts. `prefix` points the links at the
+    catalog page from elsewhere."""
+    items = "".join(f'<li><a href="{prefix}#{slug(g)}">{html.escape(g)}</a> <span class="n">{n} module{"s" if n != 1 else ""}</span></li>'
+                    for g, n in area_counts(mods))
+    hid = "areas-title" if not prefix else "areas-title-" + slug(title)
+    return f'<nav class="toc areas" aria-labelledby="{hid}"><p class="toc-title" id="{hid}">{html.escape(title)}</p><ul>{items}</ul></nav>'
+
+
+def module_facts(m: str, assurance: str, reqs: dict[str, str], rel: dict) -> str:
+    """The facts an evaluator checks first, as a description list above the README."""
+    rows = [("Graph area", f'<a href="{BASE}/modules/#{slug(group_of(m))}">{html.escape(group_of(m))}</a>'),
+            ("Assurance", html.escape(assurance) if assurance else "see the README")]
+    if reqs:
+        rows.append(("Requires", " · ".join(f"{html.escape(n)} <code>{html.escape(v)}</code>" for n, v in reqs.items())))
+    rows.append(("Release", f'<a href="{rel["url"]}">{html.escape(rel["tag"])}</a>, {html.escape(rel["published"][:10])}'))
+    rows.append(("Licence", f'MIT (<a href="https://github.com/{REPO}/blob/{rel["tag"]}/LICENSE">LICENSE</a>)'))
+    return ('<dl class="facts-grid" aria-label="Module facts">'
+            + "".join(f"<div><dt>{k}</dt><dd>{v}</dd></div>" for k, v in rows) + "</dl>")
+
+
+def module_nav(m: str, mods: list[str]) -> str:
+    """Previous and next module in catalog order, and the other modules of the same Graph area."""
+    i = mods.index(m)
+    prev_m = mods[i - 1] if i > 0 else None
+    next_m = mods[i + 1] if i + 1 < len(mods) else None
+    g = group_of(m)
+    siblings = [x for x in mods if group_of(x) == g and x != m]
+
+    def link(x: str, rel: str) -> str:
+        return (f'<a href="{page_url(x)}" rel="{rel}"><span class="dir">{"Previous" if rel == "prev" else "Next"}</span>'
+                f'<code>{html.escape(short(x))}</code></a>')
+
+    sib = ""
+    if siblings:
+        items = "".join(f'<li><a href="{page_url(x)}"><code>{html.escape(short(x))}</code></a></li>' for x in siblings)
+        sib = (f'<nav class="siblings" aria-labelledby="siblings-title"><p class="toc-title" id="siblings-title">'
+               f'Also in {html.escape(g)}</p><ul>{items}</ul></nav>')
+    pager = (f'<nav class="pager" aria-label="Neighbouring modules">'
+             f'{link(prev_m, "prev") if prev_m else "<span></span>"}'
+             f'<a class="all" href="{BASE}/modules/">All {len(mods)} verified modules</a>'
+             f'{link(next_m, "next") if next_m else "<span></span>"}</nav>')
+    return sib + pager
 
 
 HUB_HEADER = """<a class="skip" href="#main">Skip to content</a>
@@ -345,20 +442,27 @@ def hub_footer() -> str:
 """
 
 
-def hub(rel: dict) -> str:
+def hub(rel: dict, mods: list[str], floors: dict[str, str], reqs: dict[str, dict[str, str]]) -> str:
     """The satolap home page: one card per product in tools/products.json."""
     data = json.load(open(os.path.join(ROOT, "tools", "products.json"), encoding="utf-8"))
     cards = []
     for p in data["products"]:
         href = p.get("path") or p.get("url")
-        facts = ""
+        facts = areas = status = ""
         if p.get("release_facts"):
             c = rel["counts"]
-            facts = ('<ul class="facts">'
-                     f'<li><b>{html.escape(rel["tag"])}</b> latest release</li>'
+            facts = ('<ul class="facts" aria-label="Release facts">'
+                     f'<li><b>{html.escape(rel["tag"])}</b> latest release, {html.escape(rel["published"][:10])}</li>'
                      f'<li><b>{c["v1.0"] or "–"}</b> v1.0 modules</li>'
                      f'<li><b>{c["beta"] or "–"}</b> beta modules</li>'
                      f'<li><b>{c["verified"] or "–"}</b> verified modules</li></ul>')
+            areas = ('<p class="areas-line"><span class="label">Verified coverage</span> '
+                     + ", ".join(f'<a href="{BASE}/modules/#{slug(g)}">{html.escape(g)}</a> ({n})' for g, n in area_counts(mods))
+                     + ".</p>")
+            status = ('<p class="areas-line"><span class="label">Status</span> '
+                      f'Pre-1.0 (0.x line): breaking changes arrive in minor releases with migration notes; pin a patch-only constraint. '
+                      f'Security fixes go to the latest release. MIT licence. Terraform {html.escape(floors.get("terraform", "1.11.0"))} or later; '
+                      f'{provider_line(reqs, rel["provider_tested"])}.</p>')
         links = " ".join(f'<a class="btn" href="{html.escape(l["url"])}">{html.escape(l["label"])}</a>' for l in p.get("links", []))
         cards.append(f"""<article class="product">
       <img class="plogo" src="{html.escape(p.get('logo', '/logo.svg'))}" width="88" height="77" alt="">
@@ -367,7 +471,9 @@ def hub(rel: dict) -> str:
         <p class="ptag">{html.escape(p['tagline'])}</p>
         <p>{html.escape(p['description'])}</p>
         {facts}
-        <div class="cta"><a class="btn primary" href="{html.escape(href)}">Documentation</a> {links}</div>
+        {areas}
+        {status}
+        <div class="cta"><a class="btn primary" href="{html.escape(href)}">Documentation</a> <a class="btn" href="{html.escape(href)}#start">Get started</a> {links}</div>
       </div>
     </article>""")
     return (head("satolap: open-source infrastructure as code", "Open-source projects by satolap, including terraform-msgraph-modules: Terraform modules for Microsoft Graph.",
@@ -378,7 +484,7 @@ def hub(rel: dict) -> str:
     <div>
       <p class="eyebrow">satolap</p>
       <h1>Open-source infrastructure-as-code projects.</h1>
-      <p class="lede">Each product here is published openly on GitHub, with versioned releases and the documentation to adopt it.</p>
+      <p class="lede">Each product here is published openly on GitHub, with versioned releases, checksummed release assets and the documentation to adopt it.</p>
     </div>
   </div>
   <section id="products">
@@ -449,7 +555,11 @@ def audit() -> int:
         themes[name] = dict(re.findall(r"--([\w-]+):\s*(#[0-9a-fA-F]{3,6})", blk))
     pairs = [("ink", "bg", 4.5), ("ink", "surface", 4.5), ("muted", "bg", 4.5), ("muted", "surface", 4.5),
              ("accent", "bg", 4.5), ("accent", "surface", 4.5), ("accent-ink", "accent", 4.5), ("code-ink", "code-bg", 4.5),
-             ("ok", "surface", 4.5), ("warn", "surface", 4.5), ("line", "surface", 1.3)]
+             ("ink", "accent-soft", 4.5), ("accent", "accent-soft", 4.5), ("muted", "accent-soft", 4.5),
+             ("code-comment", "code-bg", 4.5), ("code-keyword", "code-bg", 4.5), ("code-string", "code-bg", 4.5),
+             ("code-entity", "code-bg", 4.5), ("code-constant", "code-bg", 4.5), ("code-tag", "code-bg", 4.5),
+             ("ok", "surface", 4.5), ("warn", "surface", 4.5), ("ok", "bg", 4.5), ("warn", "bg", 4.5),
+             ("line", "surface", 1.3)]
     print("## Colour contrast (WCAG 2.2: 4.5:1 for text, 3:1 for large text and UI)")
     problems = []
     for t, tok in themes.items():
@@ -465,44 +575,80 @@ def audit() -> int:
         def __init__(self):
             super().__init__(); self.h = []; self.img_noalt = 0; self.links = []; self._a = None
             self.main = False; self.lang = False; self.title = ""; self._t = False; self.desc = ""
+            self.viewport = False; self.skip = False; self.navs_unnamed = 0; self.ids = []; self.in_md = 0
+            self.h_text = []; self._h = None; self.regions_unnamed = 0; self.landmarks = set()
         def handle_starttag(self, tag, attrs):
             a = dict(attrs)
-            if re.fullmatch(r"h[1-6]", tag): self.h.append(int(tag[1]))
+            if re.fullmatch(r"h[1-6]", tag): self.h.append(int(tag[1])); self._h = []
             if tag == "img" and "alt" not in a: self.img_noalt += 1
-            if tag == "a": self._a = [a.get("aria-label") or ""]
+            if tag == "a": self._a = [a.get("aria-label") or ""]; self._href = a.get("href")
             if tag == "main": self.main = True
+            if tag in ("header", "footer", "main"): self.landmarks.add(tag)
             if tag == "html" and a.get("lang"): self.lang = True
             if tag == "title": self._t = True
             if tag == "meta" and a.get("name") == "description": self.desc = a.get("content") or ""
+            if tag == "meta" and a.get("name") == "viewport": self.viewport = True
             if tag == "img" and self._a is not None: self._a.append(a.get("alt") or "img")
+            if tag == "nav" and not (a.get("aria-label") or a.get("aria-labelledby")): self.navs_unnamed += 1
+            if a.get("role") == "region" and not (a.get("aria-label") or a.get("aria-labelledby")): self.regions_unnamed += 1
+            if a.get("id"): self.ids.append(a["id"])
+            if tag == "article" and "md" in (a.get("class") or "").split(): self.in_md += 1
+            if tag == "a" and a.get("class") == "skip" and a.get("href") == "#main": self.skip = True
         def handle_endtag(self, tag):
-            if tag == "a" and self._a is not None: self.links.append("".join(self._a).strip()); self._a = None
+            if tag == "a" and self._a is not None:
+                self.links.append(("".join(self._a).strip(), self._href, bool(self.in_md))); self._a = None
             if tag == "title": self._t = False
+            if re.fullmatch(r"h[1-6]", tag) and self._h is not None: self.h_text.append("".join(self._h).strip()); self._h = None
+            if tag == "article" and self.in_md: self.in_md -= 1
         def handle_data(self, d):
             if self._a is not None: self._a.append(d)
+            if self._h is not None: self._h.append(d)
             if self._t: self.title += d
     pages = sorted(glob.glob(os.path.join(SITE, "**", "*.html"), recursive=True))
-    total = 0
+    total, titles, biggest = 0, {}, ("", 0)
     print("\n## Pages")
     for f in pages:
         text = open(f, encoding="utf-8").read(); total += len(text.encode())
         p = P(); p.feed(text)
         rel = os.path.relpath(f, SITE)
+        if len(text) > biggest[1]: biggest = (rel, len(text))
         skips = sum(1 for a, b in zip(p.h, p.h[1:]) if b > a + 1)
         issues = []
         if p.h.count(1) != 1: issues.append(f"{p.h.count(1)} h1")
+        if p.h and p.h[0] != 1: issues.append("first heading is not h1")
         if skips: issues.append(f"{skips} heading-level skips")
+        if any(not t for t in p.h_text): issues.append("empty heading")
         if p.img_noalt: issues.append(f"{p.img_noalt} img without alt")
-        empty = sum(1 for l in p.links if not l)
+        empty = sum(1 for t, _, _ in p.links if not t)
         if empty: issues.append(f"{empty} links without text")
+        generic = sum(1 for t, _, _ in p.links if t.lower().rstrip(".") in ("here", "click here", "link", "more", "read more", "this"))
+        if generic: issues.append(f"{generic} links with generic text")
+        # Same link text to different targets on one page (WCAG 2.4.4); README prose is the source's own
+        seen: dict[str, set] = {}
+        d = os.path.dirname(rel).replace(os.sep, "/")
+        here = "/" + (d + "/" if d else "")
+        for t, href, md in p.links:
+            if t and not md: seen.setdefault(t, set()).add(here + href if (href or "").startswith("#") else href)
+        ambiguous = [t for t, hs in seen.items() if len(hs) > 1]
+        if ambiguous: issues.append(f"ambiguous link text {ambiguous[:3]}")
+        dup_ids = sorted({i for i in p.ids if p.ids.count(i) > 1})
+        if dup_ids: issues.append(f"duplicate ids {dup_ids[:3]}")
+        if p.navs_unnamed: issues.append(f"{p.navs_unnamed} nav without a name")
+        if p.regions_unnamed: issues.append(f"{p.regions_unnamed} region without a name")
         if not p.main: issues.append("no <main>")
+        if {"header", "footer"} - p.landmarks: issues.append("missing header or footer landmark")
+        if not p.skip: issues.append("no skip link")
         if not p.lang: issues.append("no lang")
+        if not p.viewport: issues.append("no viewport meta")
         if not (10 <= len(p.title) <= 70): issues.append(f"title length {len(p.title)}")
+        if p.title in titles: issues.append(f"title also used by {titles[p.title]}")
+        titles.setdefault(p.title, rel)
         if not (50 <= len(p.desc) <= 170): issues.append(f"description length {len(p.desc)}")
         if len(text) > 200_000: issues.append(f"{len(text)//1024} KB")
         if issues:
             problems.extend(f"{rel}: {i}" for i in issues)
-    print(f"  {len(pages)} pages, {total // 1024} KB of HTML in total; style.css {len(css) // 1024} KB")
+    print(f"  {len(pages)} pages, {total // 1024} KB of HTML in total (largest {biggest[0]}: {biggest[1] // 1024} KB); "
+          f"style.css {len(css) // 1024} KB; no scripts, fonts or third-party assets")
     print(f"\n## Findings ({len(problems)})")
     from collections import Counter
     kinds = Counter(re.sub(r"^[^:]+: ", "", x) if ": " in x else x for x in problems)
@@ -535,15 +681,20 @@ def main() -> int:
     minor = ".".join(tag.lstrip("v").split(".")[:2])
     mods = verified_modules(tag)
     modset = set(mods)
-    info = {}
+    info, reqs, pages = {}, {}, {}
     shutil.rmtree(SITE, ignore_errors=True)
     shutil.copytree(STATIC, SITE)
     for m in mods:
         md = gh(f"repos/{REPO}/contents/verified/{m}/README.md?ref={tag}", "-H", "Accept: application/vnd.github.raw")
         info[m] = summary_and_assurance(md)
+        reqs[m] = requirements(md)
         md_body = re.sub(r"\A\s*#\s+[^\n]*\n", "", md, count=1)  # the page has its own title
         body, toc = heading_ids(sanitize(render(rewrite_links(md_body, m, tag, modset))))
-        body = wrap_tables(body)
+        pages[m] = (wrap_tables(body), toc)
+        print(f"  {m}")
+    floors = floor_versions(reqs)
+    for m in mods:
+        body, toc = pages[m]
         src = f"satolap/modules/msgraph//verified/{m}"
         title = f"verified/{m}"
         desc = meta_desc(info[m][0], f"Verified Terraform module verified/{m} for Microsoft Graph: inputs, permissions and usage.")
@@ -555,27 +706,29 @@ def main() -> int:
   <nav class="crumbs" aria-label="Breadcrumb">{crumbs}</nav>
   <h1><code>{html.escape(title)}</code></h1>
   {badge}
+  {f'<p class="sub">{md_inline(info[m][0])}</p>' if info[m][0] else ""}
   <div class="srcbox">
     <pre tabindex="0" role="region" aria-label="Module block to copy">module "{html.escape(m.rsplit('/', 1)[-1].replace('-', '_'))}" {{
   source  = "{html.escape(src)}"
   version = "~&gt; {minor}.0"
 }}</pre>
-    <p class="links"><a href="https://github.com/{REPO}/tree/{tag}/verified/{m}">Source at {tag}</a> · <a href="https://registry.terraform.io/modules/satolap/modules/msgraph">Terraform Registry</a> · <a href="https://github.com/{REPO}/releases/tag/{tag}">Release notes</a></p>
+    <p class="links"><a href="https://github.com/{REPO}/tree/{tag}/verified/{m}">Source at {tag}</a> · <a href="https://registry.terraform.io/modules/satolap/modules/msgraph">Terraform Registry</a> · <a href="https://github.com/{REPO}/releases/tag/{tag}">Release notes</a> · <a href="https://github.com/{REPO}/issues/new/choose">Report a problem</a></p>
   </div>
+  {module_facts(m, info[m][1], reqs[m], rel)}
   {toc_nav(toc)}
   <article class="md">
 {body}
   </article>
+  {module_nav(m, mods)}
 </main>
 """ + footer(rel))
         write(os.path.join(OUT, "modules", m, "index.html"), page)
-        print(f"  {m}")
     catalog = (head("Verified modules: terraform-msgraph-modules", f"The {len(mods)} reviewed, verified Terraform modules for Microsoft Graph in {tag}.", SITE_URL + "modules/")
                + "\n" + HEADER + f"""
 <main id="main" class="wrap modpage">
   <nav class="crumbs" aria-label="Breadcrumb"><a href="{BASE}/">terraform-msgraph-modules</a> / <span aria-current="page">Verified modules</span></nav>
   <h1>Verified modules</h1>
-  <p class="sub">{len(mods)} reviewed modules in <a href="{rel['url']}">{tag}</a> for directory objects, applications, identity governance, role management and Conditional Access. Each page shows the module's README from the release: inputs, permissions, licence requirements, lifecycle notes and its assurance level.</p>
+  <p class="sub">{len(mods)} reviewed modules in <a href="{rel['url']}">{tag}</a> ({rel['published'][:10]}) across {len(area_counts(mods))} Microsoft Graph areas. Each page shows the module's README from the release: inputs, permissions, licence requirements, lifecycle notes and its assurance level, plus the module block to copy. Every module needs Terraform {html.escape(floors.get('terraform', '1.11.0'))} or later, and {provider_line(reqs, rel['provider_tested'])}; each page states its own requirements. New here? Read <a href="{BASE}/#start">Get started</a> first.</p>
 {area_index(mods)}
 {group_lists(mods, info, tag, True)}
 </main>
@@ -587,9 +740,15 @@ def main() -> int:
         "{{HEAD}}": head("terraform-msgraph-modules: Terraform modules for Microsoft Graph",
                          "Versioned, tested Terraform modules for Microsoft Graph v1.0 and beta on the microsoft/msgraph provider, plus verified modules for Entra ID governance.", SITE_URL),
         "{{HEADER}}": HEADER, "{{FOOTER}}": footer(rel), "{{TAG}}": tag, "{{MINOR}}": minor,
+        "{{PUBLISHED}}": rel["published"][:10],
         "{{V1_COUNT}}": str(c["v1.0"] or "–"), "{{BETA_COUNT}}": str(c["beta"] or "–"),
         "{{VERIFIED_COUNT}}": str(c["verified"] or len(mods)),
+        "{{AREA_COUNT}}": str(len(area_counts(mods))),
+        "{{AREA_INDEX}}": area_index(mods, f"{BASE}/modules/", "Verified coverage by Graph area"),
         "{{VERIFIED_GROUPS}}": group_lists(mods, info, tag, False),
+        "{{TF_MIN}}": floors.get("terraform", "1.11.0"), "{{PROVIDER_LINE}}": provider_line(reqs, rel["provider_tested"]),
+        "{{PROVIDER_TESTED}}": rel["provider_tested"] or "the version in release-manifest.json",
+        "{{ASSETS}}": ", ".join(f"<code>{html.escape(a)}</code>" for a in rel["assets"]) or "the release archives",
     }
     for k, v in repl.items():
         home = home.replace(k, v)
@@ -597,7 +756,7 @@ def main() -> int:
     if left:
         raise SystemExit(f"unfilled placeholders: {left}")
     write(os.path.join(OUT, "index.html"), home)
-    write(os.path.join(SITE, "index.html"), hub(rel))
+    write(os.path.join(SITE, "index.html"), hub(rel, mods, floors, reqs))
     write(os.path.join(SITE, "404.html"), (head("Page not found: satolap", "This page does not exist. Find a verified module, the quick start or the satolap home page instead.", "https://satolap.github.io/404.html")
           + "\n" + HUB_HEADER + f"""
 <main id="main" class="wrap modpage">

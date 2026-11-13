@@ -9,8 +9,8 @@ Source of https://satolap.github.io: the satolap home page, plus a documentation
 | Output | Source |
 | --- | --- |
 | `/` and `/404.html` | `tools/products.json`, with live release facts for each product that sets `release_facts` |
-| `/terraform-msgraph-modules/` | `tools/templates/home.html`, filled with the latest release's tag and module counts (parsed from its release notes) and the verified module list |
-| `/terraform-msgraph-modules/modules/` and `/terraform-msgraph-modules/modules/<path>/` | every verified module of the latest release (a folder under `verified/` with `main.tf` and `README.md`, tests excluded). Each page renders that module's `README.md` through GitHub's Markdown API |
+| `/terraform-msgraph-modules/` | `tools/templates/home.html`, filled with the latest release's tag, date, module counts and tested provider version (parsed from its release notes), its asset names, the verified module list grouped by Graph area, and the minimum Terraform and provider versions across the verified module READMEs |
+| `/terraform-msgraph-modules/modules/` and `/terraform-msgraph-modules/modules/<path>/` | every verified module of the latest release (a folder under `verified/` with `main.tf` and `README.md`, tests excluded). Each page renders that module's `README.md` through GitHub's Markdown API, with a facts box (Graph area, assurance, requirements, release, licence), an "On this page" list, the other modules of its Graph area and previous/next links |
 | `/style.css`, `/logo.svg`, `/.nojekyll` | `static/` |
 
 Relative links in a README that point to another verified module go to that module's page on this site. Every other relative link goes to GitHub at the release tag.
@@ -22,7 +22,9 @@ Relative links in a README that point to another verified module go to that modu
 ```bash
 python3 tools/build.py            # build _site/ for the latest release
 python3 tools/build.py --verify   # internal links resolve; no private names, tenant domains or scripts
-python3 tools/build.py --audit    # design and accessibility facts: contrast, headings, alt text, titles, page weight
+python3 tools/build.py --audit    # design and accessibility facts: contrast (text, code and status colours in both themes),
+                                  # heading order, alt text, link text, landmarks and named navs, skip links, titles,
+                                  # descriptions, duplicate ids, page weight
 python3 tools/build.py --check    # is the deployed site older than the latest release?
 python3 -m http.server -d _site   # preview at http://localhost:8000/terraform-msgraph-modules/
 ```
