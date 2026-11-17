@@ -381,3 +381,9 @@ footer a { color: var(--muted); }
 .areas-line { font-size: var(--fs-3); }
 .areas-line .label { display: inline-block; font-size: var(--fs-1); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; color: var(--muted); margin-right: var(--sp-1); }
 @media (max-width: 560px) { .product { grid-template-columns: 1fr; } .product .plogo { width: 56px; } }
+
+/* Blog uses the same spacing and typography tokens as the product cards. */
+.posts { display: grid; gap: var(--sp-4); margin-top: var(--sp-5); }
+.card.post h2 { margin: 0 0 var(--sp-1); font-size: var(--fs-6); }
+.card.post .path { font: var(--fs-1)/1.4 var(--font-mono); margin: 0 0 var(--sp-2); }
+.blog { max-width: 80ch; }

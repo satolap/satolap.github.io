@@ -5,6 +5,7 @@ Facts come only from the public repository satolap/terraform-msgraph-modules at 
 the release notes (module counts), the tag's tree (which verified modules exist) and each verified module's
 README.md, rendered with GitHub's own Markdown API (the same sanitised HTML github.com shows).
 
+    python3 tools/build.py --review   # release/deploy status, rebuild, verify and accessibility audit
     python3 tools/build.py            # rebuild everything for the latest release
     python3 tools/build.py --audit    # design and accessibility facts (contrast, headings, alt text, sizes)
     python3 tools/build.py --check    # print whether the deployed site is older than the latest release
@@ -34,6 +35,7 @@ STATIC = os.path.join(ROOT, "static")         # copied as-is into _site (redirec
 OUT = os.path.join(SITE, BASE.strip("/"))
 TEMPLATES = os.path.join(ROOT, "tools", "templates")
 STAMP = os.path.join(OUT, "release.json")
+POSTS = os.path.join(TEMPLATES, "posts")  # YYYY-MM-DD-slug.md; title/summary front matter; draft: true to withhold
 
 # Catalog groups, in display order: (title, path prefixes under verified/). Unknown modules land in "Other".
 GROUPS = [
@@ -482,12 +484,14 @@ def module_nav(m: str, mods: list[str]) -> str:
     return sib + pager
 
 
-HUB_HEADER = """<a class="skip" href="#main">Skip to content</a>
+def hub_header(blog: bool) -> str:
+    blog_link = '\n      <a href="/blog/">Blog</a>' if blog else ""
+    return f"""<a class="skip" href="#main">Skip to content</a>
 <header class="top">
   <div class="wrap">
     <span class="brand"><a class="org" href="/" aria-label="satolap home"><img src="/logo.svg" width="30" height="26" alt="">satolap</a></span>
     <nav class="links" aria-label="Sections">
-      <a href="/#products">Products</a>
+      <a href="/#products">Products</a>{blog_link}
       <a href="https://github.com/satolap">GitHub</a>
     </nav>
   </div>
@@ -506,7 +510,7 @@ def hub_footer() -> str:
 """
 
 
-def hub(rel: dict, mods: list[str], floors: dict[str, str], reqs: dict[str, dict[str, str]]) -> str:
+def hub(rel: dict, mods: list[str], floors: dict[str, str], reqs: dict[str, dict[str, str]], blog: bool = False) -> str:
     """The satolap home page: one card per product in tools/products.json."""
     data = json.load(open(os.path.join(ROOT, "tools", "products.json"), encoding="utf-8"))
     cards = []
@@ -541,7 +545,7 @@ def hub(rel: dict, mods: list[str], floors: dict[str, str], reqs: dict[str, dict
       </div>
     </article>""")
     return (head("satolap: open-source infrastructure as code", "Open-source projects by satolap, including terraform-msgraph-modules: Terraform modules for Microsoft Graph.",
-                 "https://satolap.github.io/") + "\n" + HUB_HEADER + f"""
+                 "https://satolap.github.io/") + "\n" + hub_header(blog) + f"""
 <main id="main" class="wrap hub">
   <div class="hub-hero">
     <img class="hero-logo" src="/logo.svg" width="128" height="112" alt="">
@@ -557,6 +561,105 @@ def hub(rel: dict, mods: list[str], floors: dict[str, str], reqs: dict[str, dict
   </section>
 </main>
 """ + hub_footer())
+
+
+POST_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
+
+
+def load_posts() -> list[dict]:
+    """Blog posts from tools/templates/posts/YYYY-MM-DD-slug.md, newest first. Each starts with front matter:
+    ---, title: ..., summary: ..., (optional) draft: true, ---. Drafts and other files are skipped."""
+    posts = []
+    if not os.path.isdir(POSTS):
+        return posts
+    for name in sorted(os.listdir(POSTS)):
+        m = POST_NAME.fullmatch(name)
+        if not m:
+            continue
+        from datetime import date
+        date.fromisoformat(m.group(1))  # reject invalid calendar dates
+        text = open(os.path.join(POSTS, name), encoding="utf-8").read()
+        fm = re.match(r"\A---\n(.*?)\n---\n", text, re.S)
+        if not fm:
+            raise SystemExit(f"tools/templates/posts/{name}: missing front matter (---, title:, summary:, ---)")
+        meta = dict(re.findall(r"^([a-z]+):\s*(.*?)\s*$", fm.group(1), re.M))
+        if meta.get("draft", "").lower() == "true":
+            continue
+        for key in ("title", "summary"):
+            if not meta.get(key):
+                raise SystemExit(f"tools/templates/posts/{name}: front matter needs {key}:")
+        body = re.sub(r"\A\s*#\s+[^\n]*\n", "", text[fm.end():], count=1)  # the page has its own title
+        posts.append({"date": m.group(1), "slug": m.group(2), "title": meta["title"], "summary": meta["summary"],
+                      "md": body, "url": f"/blog/{m.group(2)}/"})
+    slugs = [p["slug"] for p in posts]
+    if len(slugs) != len(set(slugs)):
+        raise SystemExit("tools/templates/posts/: two posts share a slug")
+    return sorted(posts, key=lambda p: p["date"], reverse=True)
+
+
+def human_date(d: str) -> str:
+    y, mo, da = d.split("-")
+    months = ["January", "February", "March", "April", "May", "June", "July", "August", "September",
+              "October", "November", "December"]
+    return f"{int(da)} {months[int(mo) - 1]} {y}"
+
+
+def build_blog(posts: list[dict]) -> None:
+    """/blog/, one page per post and an Atom feed. Nothing is written when there are no published posts."""
+    if not posts:
+        return
+    feed_link = '<link rel="alternate" type="application/atom+xml" title="satolap blog" href="/blog/feed.xml">'
+    for p in posts:
+        body = heading_ids(sanitize(render(p["md"])))
+        body = wrap_tables(body)
+        page = (head(f"{p['title']}: satolap blog", meta_desc(p["summary"], p["summary"]), "https://satolap.github.io" + p["url"])
+                .replace("</head>", feed_link + "\n</head>") + "\n" + hub_header(True) + f"""
+<main id="main" class="wrap hub blog">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <a href="/blog/">Blog</a></nav>
+  <h1>{html.escape(p['title'])}</h1>
+  <p class="sub"><time datetime="{p['date']}">{human_date(p['date'])}</time></p>
+  {onpage_nav(outline(body))}
+  <article class="md">
+{body}
+  </article>
+</main>
+""" + hub_footer())
+        write(os.path.join(SITE, "blog", p["slug"], "index.html"), page)
+        print(f"  blog/{p['slug']}")
+    items = "".join(f"""<article class="card post"><h2><a href="{p['url']}">{html.escape(p['title'])}</a></h2>
+      <p class="path"><time datetime="{p['date']}">{human_date(p['date'])}</time></p><p>{md_inline(p['summary'])}</p></article>
+    """ for p in posts)
+    index = (head("Blog: satolap", "Articles about satolap's open-source infrastructure-as-code projects, including terraform-msgraph-modules.",
+                  "https://satolap.github.io/blog/").replace("</head>", feed_link + "\n</head>") + "\n" + hub_header(True) + f"""
+<main id="main" class="wrap hub blog">
+  <nav class="crumbs" aria-label="Breadcrumb"><a href="/">Home</a> / <span aria-current="page">Blog</span></nav>
+  <h1>Blog</h1>
+  <p class="sub">Articles about satolap's open-source projects. Subscribe with the <a href="/blog/feed.xml">Atom feed</a>.</p>
+  <div class="posts">
+    {items}
+  </div>
+</main>
+""" + hub_footer())
+    write(os.path.join(SITE, "blog", "index.html"), index)
+    esc = html.escape
+    entries = "".join(f"""  <entry>
+    <title>{esc(p['title'])}</title>
+    <link href="https://satolap.github.io{p['url']}"/>
+    <id>https://satolap.github.io{p['url']}</id>
+    <updated>{p['date']}T00:00:00Z</updated>
+    <summary>{esc(p['summary'])}</summary>
+  </entry>
+""" for p in posts)
+    write(os.path.join(SITE, "blog", "feed.xml"), f"""<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>satolap blog</title>
+  <link href="https://satolap.github.io/blog/"/>
+  <link rel="self" href="https://satolap.github.io/blog/feed.xml"/>
+  <id>https://satolap.github.io/blog/</id>
+  <updated>{posts[0]['date']}T00:00:00Z</updated>
+  <author><name>satolap</name></author>
+{entries}</feed>
+""")
 
 
 def write(path: str, text: str) -> None:
@@ -760,6 +863,16 @@ def audit() -> int:
 
 
 def main() -> int:
+    if "--review" in sys.argv:
+        # One repeatable entry point for the maintainer's recurring checks.
+        commands = [[sys.executable, __file__, "--check"],
+                    ["gh", "run", "list", "-R", "satolap/satolap.github.io", "-w", "pages.yml", "-L", "3"]]
+        commands += [[sys.executable, __file__, *args] for args in ([], ["--verify"], ["--audit"])]
+        for command in commands:
+            result = subprocess.run(command)
+            if result.returncode:
+                return result.returncode
+        return 0
     if "--verify" in sys.argv:
         return verify()
     if "--audit" in sys.argv:
@@ -855,9 +968,11 @@ def main() -> int:
             raise SystemExit(f"{template}: unfilled placeholders {left}")
         full = "terraform-msgraph-modules: Terraform modules for Microsoft Graph" if not path else f"{title}: terraform-msgraph-modules"
         write(os.path.join(OUT, path, "index.html"), layout(full, descs[path], path, body, mods, rel))
-    write(os.path.join(SITE, "index.html"), hub(rel, mods, floors, reqs))
+    posts = load_posts()
+    build_blog(posts)
+    write(os.path.join(SITE, "index.html"), hub(rel, mods, floors, reqs, bool(posts)))
     write(os.path.join(SITE, "404.html"), (head("Page not found: satolap", "This page does not exist. Find a verified module, the quick start or the satolap home page instead.", "https://satolap.github.io/404.html")
-          + "\n" + HUB_HEADER + f"""
+          + "\n" + hub_header(bool(posts)) + f"""
 <main id="main" class="wrap hub">
   <h1>Page not found</h1>
   <p class="sub">The page may have moved when a module was renamed in a new release. Try one of these:</p>
