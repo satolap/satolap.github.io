@@ -17,6 +17,8 @@ satolap/modules/msgraph//verified/&lt;module-path&gt;</pre>
 <h2 id="complete-example">A complete example</h2>
 <p>A root module that configures the provider and creates a security group with the verified <a href="/terraform-msgraph-modules/modules/groups/"><code>groups</code></a> module:</p>
 <pre tabindex="0" role="region" aria-label="Example Terraform configuration">terraform {
+  required_version = "&gt;= {{TF_MIN}}"
+
   required_providers {
     msgraph = {
       source  = "microsoft/msgraph"
